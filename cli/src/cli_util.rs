@@ -154,6 +154,7 @@ use jj_lib::workspace::WorkspaceLoadError;
 use jj_lib::workspace::WorkspaceLoader;
 use jj_lib::workspace::WorkspaceLoaderFactory;
 use jj_lib::workspace::get_working_copy_factory;
+use jj_lib::workspace_operation_runner::WorkspaceOperationRunner;
 use jj_lib::workspace_util::WorkspaceEnvironment;
 use pollster::FutureExt as _;
 use tracing::instrument;
@@ -1006,6 +1007,10 @@ impl WorkspaceCommandEnvironment {
         Ok(GitImportExportLock { _lock: lock })
     }
 
+    pub fn inner(&self) -> &WorkspaceEnvironment {
+        &self.env
+    }
+
     pub fn template_aliases_map(&self) -> &TemplateAliasesMap {
         &self.template_aliases_map
     }
@@ -1082,8 +1087,10 @@ pub struct GitImportExportLock {
 /// Provides utilities for writing a command that works on a [`Workspace`]
 /// (which most commands do).
 pub struct WorkspaceCommandHelper {
-    workspace: Workspace,
-    user_repo: ReadonlyUserRepo,
+    operation_runner: WorkspaceOperationRunner,
+    // TODO: delete these
+    // workspace: Workspace,
+    // user_repo: ReadonlyUserRepo,
     env: WorkspaceCommandEnvironment,
     // TODO: Parsed template can be cached if it doesn't capture 'repo lifetime
     commit_summary_template_text: String,
@@ -1128,9 +1135,16 @@ impl WorkspaceCommandHelper {
         let may_update_working_copy =
             may_snapshot_working_copy && env.command.should_commit_transaction();
 
-        let helper = Self {
+        let workspace_env = env.inner().clone();
+
+        let operation_runner = WorkspaceOperationRunner {
+            env: workspace_env,
             workspace,
             user_repo: ReadonlyUserRepo::new(repo),
+        };
+
+        let helper = Self {
+            operation_runner,
             env,
             commit_summary_template_text,
             op_summary_template_text,
@@ -1147,7 +1161,7 @@ impl WorkspaceCommandHelper {
 
     /// Settings for this workspace.
     pub fn settings(&self) -> &UserSettings {
-        self.workspace.settings()
+        self.operation_runner.workspace.settings()
     }
 
     pub fn check_working_copy_writable(&self) -> Result<(), CommandError> {
@@ -1170,7 +1184,8 @@ impl WorkspaceCommandHelper {
     /// that need to import from or export to Git. For non-colocated repos,
     /// returns a token with no lock inside.
     fn lock_git_import_export(&self) -> Result<GitImportExportLock, CommandError> {
-        self.env.lock_git_import_export(&self.workspace)
+        self.env
+            .lock_git_import_export(&self.operation_runner.workspace)
     }
 
     /// Note that unless you have a good reason not to do so, you should always
@@ -1254,13 +1269,17 @@ impl WorkspaceCommandHelper {
                 .repo_mut()
                 .check_out(workspace_name, &new_git_head_commit)
                 .await?;
-            let mut locked_ws = self.workspace.start_working_copy_mutation().await?;
+            let mut locked_ws = self
+                .operation_runner
+                .workspace
+                .start_working_copy_mutation()
+                .await?;
             // The working copy was presumably updated by the git command that updated
             // HEAD, so we just need to reset our working copy
             // state to it without updating working copy files.
             locked_ws.locked_wc().reset(&wc_commit).await?;
             tx.repo_mut().rebase_descendants().await?;
-            self.user_repo = ReadonlyUserRepo::new(
+            self.operation_runner.user_repo = ReadonlyUserRepo::new(
                 self.env
                     .command
                     .maybe_commit_transaction(tx, "import git head")
@@ -1268,7 +1287,7 @@ impl WorkspaceCommandHelper {
             );
             if self.env.command.should_commit_transaction() {
                 locked_ws
-                    .finish(self.user_repo.repo().op_id().clone())
+                    .finish(self.operation_runner.user_repo.repo().op_id().clone())
                     .await?;
             }
             if old_git_head.is_present() {
@@ -1343,19 +1362,19 @@ impl WorkspaceCommandHelper {
     }
 
     pub fn repo(&self) -> &Arc<ReadonlyRepo> {
-        self.user_repo.repo()
+        self.operation_runner.user_repo.repo()
     }
 
     pub fn repo_path(&self) -> &Path {
-        self.workspace.repo_path()
+        self.operation_runner.workspace.repo_path()
     }
 
     pub fn workspace(&self) -> &Workspace {
-        &self.workspace
+        &self.operation_runner.workspace
     }
 
     pub fn working_copy(&self) -> &dyn WorkingCopy {
-        self.workspace.working_copy()
+        self.operation_runner.workspace.working_copy()
     }
 
     pub fn env(&self) -> &WorkspaceCommandEnvironment {
@@ -1375,7 +1394,11 @@ impl WorkspaceCommandHelper {
         &mut self,
     ) -> Result<(LockedWorkspace<'_>, Commit), CommandError> {
         let wc_commit = self.prepare_working_copy_mutation().await?;
-        let mut locked_ws = self.workspace.start_working_copy_mutation().await?;
+        let mut locked_ws = self
+            .operation_runner
+            .workspace
+            .start_working_copy_mutation()
+            .await?;
         if wc_commit.tree().tree_ids_and_labels()
             != locked_ws.locked_wc().old_tree().tree_ids_and_labels()
         {
@@ -1392,10 +1415,14 @@ impl WorkspaceCommandHelper {
         self.check_working_copy_writable()?;
 
         let workspace_name = self.workspace_name().to_owned();
-        let mut locked_ws = self.workspace.start_working_copy_mutation().await?;
+        let mut locked_ws = self
+            .operation_runner
+            .workspace
+            .start_working_copy_mutation()
+            .await?;
         let (repo, new_commit) = working_copy::create_and_check_out_recovery_commit(
             locked_ws.locked_wc(),
-            self.user_repo.repo(),
+            self.operation_runner.user_repo.repo(),
             workspace_name,
             "RECOVERY COMMIT FROM `jj workspace update-stale`
 
@@ -1414,7 +1441,7 @@ to the current parents may contain changes from multiple commits.
             short_commit_hash(new_commit.id())
         )?;
         locked_ws.finish(repo.op_id().clone()).await?;
-        self.user_repo = ReadonlyUserRepo::new(repo);
+        self.operation_runner.user_repo = ReadonlyUserRepo::new(repo);
 
         self.snapshot_impl(ui, git_import_export_lock)
             .await
@@ -1422,11 +1449,11 @@ to the current parents may contain changes from multiple commits.
     }
 
     pub fn workspace_root(&self) -> &Path {
-        self.workspace.workspace_root()
+        self.operation_runner.workspace.workspace_root()
     }
 
     pub fn workspace_name(&self) -> &WorkspaceName {
-        self.workspace.workspace_name()
+        self.operation_runner.workspace.workspace_name()
     }
 
     pub fn get_wc_commit_id(&self) -> Option<&CommitId> {
@@ -1761,7 +1788,8 @@ to the current parents may contain changes from multiple commits.
     }
 
     pub fn id_prefix_context(&self) -> &IdPrefixContext {
-        self.user_repo
+        self.operation_runner
+            .user_repo
             .id_prefix_context()
             .get_or_init(|| self.env.new_id_prefix_context())
     }
@@ -1830,7 +1858,7 @@ to the current parents may contain changes from multiple commits.
     /// Creates operation template language environment for this workspace.
     pub fn operation_template_language(&self) -> OperationTemplateLanguage {
         OperationTemplateLanguage::new(
-            self.workspace.repo_loader(),
+            self.operation_runner.workspace.repo_loader(),
             Some(self.repo().op_id()),
             self.env.cwd(),
             self.env.operation_template_extensions(),
@@ -1952,6 +1980,7 @@ to the current parents may contain changes from multiple commits.
 
         // Compare working-copy tree and operation with repo's, and reload as needed.
         let mut locked_ws = self
+            .operation_runner
             .workspace
             .start_working_copy_mutation()
             .await
@@ -1965,7 +1994,7 @@ to the current parents may contain changes from multiple commits.
             return Ok(SnapshotStats::default());
         };
 
-        self.user_repo = ReadonlyUserRepo::new(repo);
+        self.operation_runner.user_repo = ReadonlyUserRepo::new(repo);
         let (new_tree, stats) = {
             let mut options = options;
             let progress = crate::progress::snapshot_progress(ui);
@@ -1978,7 +2007,7 @@ to the current parents may contain changes from multiple commits.
         };
         if new_tree.tree_ids_and_labels() != wc_commit.tree().tree_ids_and_labels() {
             let mut tx = start_repo_transaction(
-                self.user_repo.repo(),
+                self.operation_runner.user_repo.repo(),
                 &workspace_name,
                 self.env.command.string_args(),
             );
@@ -2078,13 +2107,13 @@ to the current parents may contain changes from multiple commits.
                 .maybe_commit_transaction(tx, "snapshot working copy")
                 .await
                 .map_err(snapshot_command_error)?;
-            self.user_repo = ReadonlyUserRepo::new(repo);
+            self.operation_runner.user_repo = ReadonlyUserRepo::new(repo);
             if !self.env.command.should_commit_transaction() {
                 writeln!(
                     ui.status(),
                     "Snapshot operation left uncommitted because --no-integrate-operation was \
                      requested: {}",
-                    short_operation_hash(self.user_repo.repo.op_id())
+                    short_operation_hash(self.operation_runner.user_repo.repo().op_id())
                 )
                 .map_err(snapshot_command_error)?;
             }
@@ -2121,7 +2150,7 @@ to the current parents may contain changes from multiple commits.
 
         if self.env.command.should_commit_transaction() {
             locked_ws
-                .finish(self.user_repo.repo().op_id().clone())
+                .finish(self.operation_runner.user_repo.repo().op_id().clone())
                 .await
                 .map_err(snapshot_command_error)?;
         }
@@ -2136,8 +2165,8 @@ to the current parents may contain changes from multiple commits.
     ) -> Result<(), CommandError> {
         assert!(self.may_update_working_copy);
         let stats = update_working_copy(
-            self.user_repo.repo(),
-            &mut self.workspace,
+            self.operation_runner.user_repo.repo(),
+            &mut self.operation_runner.workspace,
             maybe_old_commit,
             new_commit,
         )
@@ -2187,7 +2216,7 @@ to the current parents may contain changes from multiple commits.
             self.workspace_name(),
             self.env.command.string_args(),
         );
-        let id_prefix_context = self.user_repo.take_id_prefix_context();
+        let id_prefix_context = self.operation_runner.user_repo.take_id_prefix_context();
         WorkspaceCommandTransaction {
             helper: self,
             tx,
@@ -2263,7 +2292,7 @@ to the current parents may contain changes from multiple commits.
             crate::git_util::print_git_export_stats(ui, &stats)?;
         }
 
-        self.user_repo = ReadonlyUserRepo::new(
+        self.operation_runner.user_repo = ReadonlyUserRepo::new(
             self.env
                 .command
                 .maybe_commit_transaction(tx, description)
