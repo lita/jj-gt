@@ -154,19 +154,6 @@ pub fn clap_error(err: clap::Error) -> CommandError {
     cmd_err
 }
 
-impl From<ConvergeError> for CommandError {
-    fn from(err: ConvergeError) -> Self {
-        match err {
-            ConvergeError::Backend(err) => err.into(),
-            ConvergeError::Index(err) => err.into(),
-            ConvergeError::RevsetEvaluation(err) => err.into(),
-            ConvergeError::WalkPredecessors(err) => err.into(),
-            ConvergeError::IO(err) => err.into(),
-            ConvergeError::Other(err) => internal_error(err),
-        }
-    }
-}
-
 impl From<DiffEditError> for CommandError {
     fn from(err: DiffEditError) -> Self {
         user_error_with_message("Failed to edit diff", err)

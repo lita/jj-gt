@@ -54,6 +54,7 @@ use jj_lib::merged_tree::MergedTree;
 use jj_lib::object_id::ObjectId as _;
 use jj_lib::repo::Repo as _;
 use jj_lib::repo_path::RepoPathBuf;
+use jj_lib::user_error::UserError;
 use jj_lib::working_copy::SnapshotOptions;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc;
@@ -97,7 +98,7 @@ enum RunError {
 
 impl From<RunError> for CommandError {
     fn from(value: RunError) -> Self {
-        Self::new(CommandErrorKind::User, Box::new(value))
+        Self(UserError::new(CommandErrorKind::User, Box::new(value)))
     }
 }
 
@@ -699,12 +700,12 @@ fn resolve_jobs(
 ) -> Result<NonZeroUsize, CommandError> {
     if let Some(j) = jobs {
         return NonZeroUsize::new(j).ok_or_else(|| {
-            CommandError::new(
+            CommandError(UserError::new(
                 CommandErrorKind::Cli,
                 Box::new(RunError::InvalidJobCount(
                     i64::try_from(j).unwrap_or(i64::MAX),
                 )),
-            )
+            ))
         });
     }
     if let Ok(size) = workspace_command.settings().get_int("run.jobs") {
@@ -712,10 +713,10 @@ fn resolve_jobs(
             .try_into()
             .map_err(|_| RunError::InvalidJobCount(size))?;
         return NonZeroUsize::new(size).ok_or_else(|| {
-            CommandError::new(
+            CommandError(UserError::new(
                 CommandErrorKind::Config,
                 Box::new(RunError::InvalidJobCount(0)),
-            )
+            ))
         });
     }
     Ok(NonZeroUsize::MIN)
@@ -757,10 +758,10 @@ pub async fn cmd_run(
     let jobs = resolve_jobs(&workspace_command, args.jobs)?;
 
     if args.passthrough && jobs.get() > 1 {
-        return Err(CommandError::new(
+        return Err(CommandError(UserError::new(
             CommandErrorKind::Cli,
             "cannot use --passthrough with more than one job".to_string(),
-        ));
+        )));
     }
 
     tracing::debug!(?jobs, "starting `jj run`");

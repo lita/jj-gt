@@ -29,7 +29,6 @@ use crossterm::terminal::Clear;
 use crossterm::terminal::ClearType;
 use indoc::writedoc;
 use itertools::Itertools as _;
-use jj_lib::commit::Commit;
 use jj_lib::formatter::Formatter;
 use jj_lib::formatter::FormatterExt as _;
 use jj_lib::git;

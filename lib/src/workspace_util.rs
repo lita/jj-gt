@@ -21,36 +21,36 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
+use crate::config::ConfigGetResultExt as _;
+use crate::config::ConfigNamePathBuf;
+use crate::config::StackedConfig;
+use crate::conflicts::ConflictMarkerStyle;
+use crate::dsl_util::load_aliases_map;
+use crate::fileset::FilesetAliasesMap;
+use crate::fileset::FilesetParseContext;
+use crate::id_prefix::IdPrefixContext;
+use crate::ref_name::RemoteName;
+use crate::ref_name::WorkspaceName;
+use crate::ref_name::WorkspaceNameBuf;
+use crate::repo::Repo;
+use crate::revset;
+use crate::revset::ResolvedRevsetExpression;
+use crate::revset::RevsetAliasesMap;
+use crate::revset::RevsetDiagnostics;
+use crate::revset::RevsetExpression;
+use crate::revset::RevsetExtensions;
+use crate::revset::RevsetParseContext;
+use crate::revset::RevsetWorkspaceContext;
+use crate::revset::UserRevsetExpression;
+use crate::revset_util;
+use crate::revset_util::RevsetExpressionEvaluator;
+use crate::settings::UserSettings;
+use crate::store::Store;
+use crate::ui_path::RepoPathUiConverter;
+use crate::user_error::UserError;
+use crate::user_error::config_error_with_message;
+use crate::workspace::Workspace;
 use chrono::TimeZone as _;
-use jj_lib::config::ConfigGetResultExt as _;
-use jj_lib::config::ConfigNamePathBuf;
-use jj_lib::config::StackedConfig;
-use jj_lib::conflicts::ConflictMarkerStyle;
-use jj_lib::dsl_util::load_aliases_map;
-use jj_lib::fileset::FilesetAliasesMap;
-use jj_lib::fileset::FilesetParseContext;
-use jj_lib::id_prefix::IdPrefixContext;
-use jj_lib::ref_name::RemoteName;
-use jj_lib::ref_name::WorkspaceName;
-use jj_lib::ref_name::WorkspaceNameBuf;
-use jj_lib::repo::Repo;
-use jj_lib::repo_path::RepoPathUiConverter;
-use jj_lib::revset;
-use jj_lib::revset::ResolvedRevsetExpression;
-use jj_lib::revset::RevsetAliasesMap;
-use jj_lib::revset::RevsetDiagnostics;
-use jj_lib::revset::RevsetExpression;
-use jj_lib::revset::RevsetExtensions;
-use jj_lib::revset::RevsetParseContext;
-use jj_lib::revset::RevsetWorkspaceContext;
-use jj_lib::revset::UserRevsetExpression;
-use jj_lib::revset_util;
-use jj_lib::revset_util::RevsetExpressionEvaluator;
-use jj_lib::settings::UserSettings;
-use jj_lib::store::Store;
-use jj_lib::user_error::UserError;
-use jj_lib::user_error::config_error_with_message;
-use jj_lib::workspace::Workspace;
 use tracing::instrument;
 
 /// Metadata and configuration loaded for a specific workspace.
@@ -304,7 +304,7 @@ impl WorkspaceEnvironment {
 pub fn default_ignored_remote_name(store: &Store) -> Option<&'static RemoteName> {
     #[cfg(feature = "git")]
     {
-        use jj_lib::git;
+        use crate::git;
         if git::get_git_backend(store).is_ok() {
             return Some(git::REMOTE_NAME_FOR_LOCAL_GIT_REPO);
         }

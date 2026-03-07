@@ -99,7 +99,6 @@ use crate::diff_util;
 use crate::diff_util::DiffStatEntry;
 use crate::diff_util::DiffStatOptions;
 use crate::diff_util::DiffStats;
-use crate::git_util;
 use crate::operation_templater;
 use crate::operation_templater::OperationTemplateBuildFnTable;
 use crate::operation_templater::OperationTemplateEnvironment;
