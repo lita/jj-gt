@@ -95,6 +95,7 @@ use jj_lib::op_store::RefTarget;
 use jj_lib::op_walk;
 use jj_lib::op_walk::OpsetEvaluationError;
 use jj_lib::operation::Operation;
+use jj_lib::readonly_user_repo::ReadonlyUserRepo;
 use jj_lib::ref_name::RefName;
 use jj_lib::ref_name::RefNameBuf;
 use jj_lib::ref_name::RemoteName;
@@ -879,22 +880,6 @@ pub async fn merge_operations(
         )?;
     }
     Ok(merged_repo.operation().clone())
-}
-
-/// A ReadonlyRepo along with user-config-dependent derived data. The derived
-/// data is lazily loaded.
-struct ReadonlyUserRepo {
-    repo: Arc<ReadonlyRepo>,
-    id_prefix_context: OnceCell<IdPrefixContext>,
-}
-
-impl ReadonlyUserRepo {
-    fn new(repo: Arc<ReadonlyRepo>) -> Self {
-        Self {
-            repo,
-            id_prefix_context: OnceCell::new(),
-        }
-    }
 }
 
 /// A advanceable bookmark to satisfy the "advance-bookmarks" feature.
