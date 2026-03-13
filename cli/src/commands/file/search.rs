@@ -29,7 +29,7 @@ use crate::cli_util::print_unmatched_explicit_paths;
 use crate::command_error::CommandError;
 use crate::command_error::cli_error;
 use crate::complete;
-use crate::formatter::Formatter;
+use jj_lib::formatter::Formatter;
 use crate::ui::Ui;
 
 /// Search for content in files

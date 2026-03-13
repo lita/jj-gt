@@ -24,7 +24,7 @@ use crate::cli_util::CommandHelper;
 use crate::command_error::CommandError;
 use crate::diff_util;
 use crate::diff_util::DiffFormatArgs;
-use crate::formatter::FormatterExt as _;
+use jj_lib::formatter::FormatterExt as _;
 use crate::ui::Ui;
 
 /// Compare two files on disk

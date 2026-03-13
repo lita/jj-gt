@@ -52,7 +52,7 @@ use crate::command_error::internal_error;
 use crate::command_error::user_error;
 use crate::complete;
 use crate::description_util::TextEditor;
-use crate::formatter::Formatter;
+use jj_lib::formatter::Formatter;
 use crate::templater::TemplateRenderer;
 use crate::ui::Ui;
 
