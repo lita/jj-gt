@@ -121,6 +121,7 @@ pub mod view;
 pub mod working_copy;
 pub mod workspace;
 pub use jj_core::workspace_store;
+pub mod workspace_util;
 
 #[cfg(test)]
 mod tests {
