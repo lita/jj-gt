@@ -84,6 +84,7 @@ pub mod repo;
 pub use jj_core::repo_path;
 pub mod revset;
 mod revset_parser;
+pub mod revset_util;
 pub mod rewrite;
 #[cfg(feature = "testing")]
 pub mod secret_backend;
