@@ -1139,8 +1139,9 @@ impl WorkspaceCommandEnvironment {
     fn resolve_immutable_expression(
         &self,
         repo: &dyn Repo,
+        ignore_immutable: bool,
     ) -> Result<Arc<ResolvedRevsetExpression>, CommandError> {
-        let immutable_expression = if self.command.global_args().ignore_immutable {
+        let immutable_expression = if ignore_immutable {
             UserRevsetExpression::root()
         } else {
             self.immutable_expression()
@@ -2031,7 +2032,9 @@ to the current parents may contain changes from multiple commits.
         to_rewrite_expr: &Arc<ResolvedRevsetExpression>,
     ) -> Result<(), CommandError> {
         let repo = self.repo().as_ref();
-        let immutable_expr = self.env.resolve_immutable_expression(repo)?;
+        let immutable_expr = self
+            .env
+            .resolve_immutable_expression(repo, self.env.command.global_args().ignore_immutable)?;
         let Some(commit_id) = immutable_expr
             .intersection(to_rewrite_expr)
             .evaluate(repo)?
@@ -2122,7 +2125,10 @@ to the current parents may contain changes from multiple commits.
             tx.set_is_snapshot(true);
             let immutable_expr = self
                 .env
-                .resolve_immutable_expression(tx.repo())
+                .resolve_immutable_expression(
+                    tx.repo(),
+                    self.env.command.global_args().ignore_immutable,
+                )
                 .map_err(snapshot_command_error)?;
             let wc_immutable = !immutable_expr
                 .intersection(&RevsetExpression::commit(wc_commit.id().clone()))
@@ -2354,7 +2360,10 @@ to the current parents may contain changes from multiple commits.
         // failures can be ignored. snapshot_working_copy() ensures that the
         // working-copy commit is mutable.
         let maybe_new_wc_commit = if let Some(wc_commit) = &maybe_new_wc_commit
-            && let Ok(immutable_expr) = self.env.resolve_immutable_expression(tx.repo())
+            && let Ok(immutable_expr) = self.env.resolve_immutable_expression(
+                tx.repo(),
+                self.env.command.global_args().ignore_immutable,
+            )
             && !immutable_expr
                 .intersection(&RevsetExpression::commit(wc_commit.id().clone()))
                 .evaluate(tx.repo())?
@@ -2977,7 +2986,10 @@ async fn rebase_mutable_descendants(
     // tx.base_repo() here because we're interested in existing immutable
     // commits that are still reachable.
     let mut num_rebased = 0;
-    let immutable = env.resolve_immutable_expression(tx.base_repo().as_ref())?;
+    let immutable = env.resolve_immutable_expression(
+        tx.base_repo().as_ref(),
+        env.command.global_args().ignore_immutable,
+    )?;
     tx.repo_mut()
         .rebase_descendants_with_options(
             &immutable,
