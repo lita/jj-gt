@@ -115,6 +115,7 @@ pub mod tree;
 pub mod tree_builder;
 pub mod ui_path;
 pub mod union_find;
+pub mod user_error;
 pub mod view;
 pub mod working_copy;
 pub mod workspace;
