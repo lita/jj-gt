@@ -396,10 +396,6 @@ impl CommandHelper {
         TextEditor::from_settings(self.settings())
     }
 
-    pub fn revset_extensions(&self) -> &Arc<RevsetExtensions> {
-        &self.data.revset_extensions
-    }
-
     /// Parses template of the given language into evaluation tree.
     ///
     /// This function also loads template aliases from the settings. Use
@@ -934,6 +930,7 @@ pub struct WorkspaceCommandEnvironment {
     command: CommandHelper,
     settings: UserSettings,
     fileset_aliases_map: FilesetAliasesMap,
+    revset_extensions: Arc<RevsetExtensions>,
     revset_aliases_map: RevsetAliasesMap,
     template_aliases_map: TemplateAliasesMap,
     default_ignored_remote: Option<&'static RemoteName>,
@@ -966,6 +963,7 @@ impl WorkspaceCommandEnvironment {
             settings: settings.clone(),
             fileset_aliases_map,
             revset_aliases_map,
+            revset_extensions: command.data.revset_extensions.clone(),
             template_aliases_map,
             default_ignored_remote,
             path_converter,
@@ -1014,6 +1012,10 @@ impl WorkspaceCommandEnvironment {
         Ok(GitImportExportLock { _lock: lock })
     }
 
+    pub fn revset_extensions(&self) -> &Arc<RevsetExtensions> {
+        &self.revset_extensions
+    }
+
     /// Parsing context for fileset expressions specified by command arguments.
     pub(crate) fn fileset_parse_context(&self) -> FilesetParseContext<'_> {
         FilesetParseContext {
@@ -1055,7 +1057,7 @@ impl WorkspaceCommandEnvironment {
             date_pattern_context: now.into(),
             default_ignored_remote: self.default_ignored_remote,
             fileset_aliases_map: &self.fileset_aliases_map,
-            extensions: self.command.revset_extensions(),
+            extensions: &self.revset_extensions,
             workspace: Some(workspace_context),
         }
     }
@@ -1063,7 +1065,7 @@ impl WorkspaceCommandEnvironment {
     /// Creates fresh new context which manages cache of short commit/change ID
     /// prefixes. New context should be created per repo view (or operation.)
     pub fn new_id_prefix_context(&self) -> IdPrefixContext {
-        let context = IdPrefixContext::new(self.command.revset_extensions().clone());
+        let context = IdPrefixContext::new(self.revset_extensions.clone());
         match &self.short_prefixes_expression {
             None => context,
             Some(expression) => context.disambiguate_within(expression.clone()),
@@ -1147,10 +1149,10 @@ impl WorkspaceCommandEnvironment {
         // Not using self.id_prefix_context() because the disambiguation data
         // must not be calculated and cached against arbitrary repo. It's also
         // unlikely that the immutable expression contains short hashes.
-        let id_prefix_context = IdPrefixContext::new(self.command.revset_extensions().clone());
+        let id_prefix_context = IdPrefixContext::new(self.revset_extensions.clone());
         RevsetExpressionEvaluator::new(
             repo,
-            self.command.revset_extensions().clone(),
+            self.revset_extensions.clone(),
             &id_prefix_context,
             immutable_expression,
         )
@@ -1891,7 +1893,7 @@ to the current parents may contain changes from multiple commits.
     ) -> RevsetExpressionEvaluator<'_> {
         RevsetExpressionEvaluator::new(
             self.repo().as_ref(),
-            self.env.command.revset_extensions().clone(),
+            self.env.revset_extensions.clone(),
             self.id_prefix_context(),
             expression,
         )
