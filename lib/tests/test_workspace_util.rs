@@ -3,11 +3,11 @@ use std::sync::Arc;
 use jj_lib::config::ConfigLayer;
 use jj_lib::config::ConfigSource;
 use jj_lib::ref_name::WorkspaceName;
-use jj_lib::repo_path::RepoPathUiConverter;
 use jj_lib::revset;
 use jj_lib::revset::RevsetDiagnostics;
 use jj_lib::revset::RevsetExtensions;
 use jj_lib::settings::UserSettings;
+use jj_lib::ui_path::RepoPathUiConverter;
 use jj_lib::workspace_util::WorkspaceEnvironment;
 use testutils::TestWorkspace;
 
