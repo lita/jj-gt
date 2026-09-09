@@ -1,0 +1,19 @@
+target/
+.DS_Store
+
+# Rust
+debug/
+**/*.rs.bk
+*.pdb
+
+# Coverage / profiling
+*.profraw
+*.profdata
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Claude Code local permissions (machine-specific)
+.claude/settings.local.json

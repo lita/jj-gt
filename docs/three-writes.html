@@ -1,0 +1,309 @@
+<title>Three Writes, Not One</title>
+<style>
+  :root {
+    --bg: #f7f7fa;
+    --surface: #ffffff;
+    --ink: #24243a;
+    --muted: #6b6b85;
+    --line: #dcdce6;
+    --oplog: #a03bb5;
+    --files: #0b8aa3;
+    --state: #4059d8;
+    --git: #247e49;
+    --net: #a5720f;
+    --pill: #f0f0f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16161e;
+      --surface: #1e1e2a;
+      --ink: #e4e2ef;
+      --muted: #9b99b3;
+      --line: #34344a;
+      --oplog: #d879ea;
+      --files: #4cc3dc;
+      --state: #8ba0ff;
+      --git: #5fc98a;
+      --net: #e0b45a;
+      --pill: #262636;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16161e;
+    --surface: #1e1e2a;
+    --ink: #e4e2ef;
+    --muted: #9b99b3;
+    --line: #34344a;
+    --oplog: #d879ea;
+    --files: #4cc3dc;
+    --state: #8ba0ff;
+    --git: #5fc98a;
+    --net: #e0b45a;
+    --pill: #262636;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.6 -apple-system, "Segoe UI", system-ui, sans-serif;
+    margin: 0;
+    padding: 3rem 1.25rem 5rem;
+  }
+  main { max-width: 900px; margin: 0 auto; }
+  .mono, code, h1, h2, .matrix, figcaption {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  }
+  header { margin-bottom: 2.5rem; }
+  .eyebrow {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 .75rem;
+  }
+  h1 {
+    font-size: clamp(1.7rem, 4.5vw, 2.6rem);
+    line-height: 1.15; letter-spacing: -.02em;
+    margin: 0 0 1rem; text-wrap: balance;
+  }
+  h1 .n1 { color: var(--files); }
+  h1 .n2 { color: var(--state); }
+  h1 .n3 { color: var(--git); }
+  .lede { max-width: 62ch; color: var(--muted); margin: 0; }
+  .lede strong { color: var(--ink); }
+  h2 {
+    font-size: 1.02rem; letter-spacing: .01em;
+    margin: 3rem 0 1rem; padding-top: 1.25rem;
+    border-top: 1px solid var(--line);
+  }
+  h2 .sec { color: var(--muted); font-weight: 400; }
+  p { max-width: 68ch; }
+  figure { margin: 1.5rem 0; }
+  .scroll { overflow-x: auto; }
+  .scroll svg { min-width: 860px; display: block; }
+  svg { max-width: 100%; height: auto; }
+  figcaption { font-size: .78rem; color: var(--muted); margin-top: .6rem; max-width: 78ch; }
+  .writes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .75rem; margin: 1.25rem 0; }
+  .write-card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: .9rem 1rem; border-top: 3px solid var(--c);
+  }
+  .write-card .tag {
+    font-family: ui-monospace, Menlo, monospace; font-size: .72rem;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--c); font-weight: 700;
+  }
+  .write-card .api { font-family: ui-monospace, Menlo, monospace; font-size: .8rem; margin: .35rem 0 .3rem; }
+  .write-card p { font-size: .85rem; color: var(--muted); margin: 0; }
+  .matrix-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  table.matrix { border-collapse: collapse; width: 100%; font-size: .82rem; min-width: 700px; }
+  .matrix th, .matrix td { padding: .55rem .8rem; text-align: left; white-space: nowrap; }
+  .matrix thead th {
+    font-size: .7rem; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); border-bottom: 1px solid var(--line); font-weight: 600;
+  }
+  .matrix tbody tr + tr td { border-top: 1px solid var(--line); }
+  .matrix td.cmd { font-weight: 700; }
+  .matrix .ops { color: var(--oplog); }
+  .dot { display: inline-block; width: .62em; height: .62em; border-radius: 50%; margin-right: .4em; vertical-align: baseline; }
+  .d-git { background: var(--git); } .d-files { background: var(--files); }
+  .d-state { background: var(--state); } .d-net { background: var(--net); }
+  .matrix .no { color: var(--muted); opacity: .55; }
+  .fails { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: .75rem; margin: 1.25rem 0; }
+  .fail {
+    background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--c);
+    border-radius: 10px; padding: .85rem 1rem; font-size: .86rem;
+  }
+  .fail b { font-family: ui-monospace, Menlo, monospace; font-size: .8rem; color: var(--c); }
+  .fail p { margin: .35rem 0 0; color: var(--muted); font-size: .84rem; }
+  pre {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 1rem 1.2rem; overflow-x: auto; font-size: .8rem; line-height: 1.65;
+  }
+  code { font-size: .85em; background: var(--pill); border-radius: 4px; padding: .08em .35em; }
+  pre code { background: none; padding: 0; font-size: 1em; }
+  .c-oplog { color: var(--oplog); } .c-files { color: var(--files); }
+  .c-state { color: var(--state); } .c-git { color: var(--git); } .c-cmt { color: var(--muted); }
+  footer { margin-top: 3.5rem; padding-top: 1rem; border-top: 1px solid var(--line); font-size: .78rem; color: var(--muted); }
+</style>
+
+<main>
+<header>
+  <p class="eyebrow">JJCon · building developer tools on jj-lib</p>
+  <h1>Three writes, not one:<br><span class="n1">files</span> · <span class="n2">workspace state</span> · <span class="n3">git refs</span></h1>
+  <p class="lede"><strong>Transaction::commit writes only the op log</strong> — the view, the operation, and the op-heads swap. The files on disk, the workspace's record of where it is, and the colocated <code>.git</code> are three separate writes that jj-lib leaves entirely to you. The jj CLI performs them silently around every command; a tool built on jj-lib must reimplement them, in the right order, or the repo drifts apart.</p>
+</header>
+
+<h2><span class="sec">01</span> · Anatomy of one command</h2>
+<p>Every mutating <code>gt</code> command ends with the same choreography. The order is load-bearing — and it is not the order the writes are numbered in:</p>
+
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 960 430" role="img" aria-label="Timeline of one gt command: git refs are written inside the transaction before commit; the op log write is the commit; working-copy files and workspace state are written after commit with the new operation id.">
+  <!-- time arrow -->
+  <line x1="185" y1="26" x2="925" y2="26" stroke="var(--muted)" stroke-width="1"/>
+  <polygon points="925,26 915,22 915,30" fill="var(--muted)"/>
+  <text x="185" y="16" font-size="11" fill="var(--muted)" font-family="ui-monospace,Menlo,monospace" letter-spacing="1">EXECUTION ORDER</text>
+
+  <!-- before/after commit divider -->
+  <line x1="637" y1="40" x2="637" y2="415" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 4" opacity="0.55"/>
+  <text x="629" y="54" font-size="10.5" fill="var(--muted)" text-anchor="end" font-family="ui-monospace,Menlo,monospace">inside the tx</text>
+  <text x="645" y="54" font-size="10.5" fill="var(--muted)" font-family="ui-monospace,Menlo,monospace">after commit</text>
+
+  <!-- code lane pills -->
+  <g font-family="ui-monospace,Menlo,monospace" font-size="12" text-anchor="middle">
+    <rect x="150" y="66" width="150" height="30" rx="8" fill="var(--pill)" stroke="var(--line)"/>
+    <text x="225" y="85" fill="var(--ink)">mutate the view</text>
+
+    <rect x="318" y="66" width="196" height="30" rx="8" fill="var(--pill)" stroke="var(--git)"/>
+    <text x="416" y="85" fill="var(--ink)">reset_head · export_refs</text>
+
+    <rect x="540" y="66" width="150" height="30" rx="8" fill="var(--pill)" stroke="var(--oplog)"/>
+    <text x="615" y="85" fill="var(--ink)">tx.commit(desc)</text>
+
+    <rect x="712" y="66" width="130" height="30" rx="8" fill="var(--pill)" stroke="var(--files)"/>
+    <text x="777" y="85" fill="var(--ink)">check_out(…)</text>
+
+    <rect x="856" y="66" width="100" height="30" rx="8" fill="var(--pill)" stroke="var(--state)"/>
+    <text x="906" y="85" fill="var(--ink)">finish(op)</text>
+  </g>
+
+  <!-- store lanes -->
+  <g font-family="ui-monospace,Menlo,monospace" font-size="12">
+    <text x="0" y="180" fill="var(--git)" font-weight="700">.git/</text>
+    <text x="0" y="196" fill="var(--muted)" font-size="10.5">refs · HEAD · index</text>
+    <line x1="150" y1="184" x2="940" y2="184" stroke="var(--line)"/>
+
+    <text x="0" y="252" fill="var(--oplog)" font-weight="700">.jj/repo/</text>
+    <text x="0" y="268" fill="var(--muted)" font-size="10.5">op store · op heads</text>
+    <line x1="150" y1="256" x2="940" y2="256" stroke="var(--line)"/>
+
+    <text x="0" y="324" fill="var(--files)" font-weight="700">worktree</text>
+    <text x="0" y="340" fill="var(--muted)" font-size="10.5">your files on disk</text>
+    <line x1="150" y1="328" x2="940" y2="328" stroke="var(--line)"/>
+
+    <text x="0" y="396" fill="var(--state)" font-weight="700">.jj/working_copy/</text>
+    <text x="0" y="412" fill="var(--muted)" font-size="10.5">checkout op-id · tree state</text>
+    <line x1="150" y1="400" x2="940" y2="400" stroke="var(--line)"/>
+  </g>
+
+  <!-- arrows: code -> stores -->
+  <!-- write 3: git, BEFORE commit -->
+  <line x1="416" y1="96" x2="416" y2="176" stroke="var(--git)" stroke-width="2"/>
+  <polygon points="416,184 411,174 421,174" fill="var(--git)"/>
+  <text x="424" y="130" font-size="11.5" fill="var(--git)" font-family="ui-monospace,Menlo,monospace">write ③ — refs/heads/*,</text>
+  <text x="424" y="145" font-size="11.5" fill="var(--git)" font-family="ui-monospace,Menlo,monospace">HEAD ⇒ parent(@)</text>
+
+  <!-- op log write -->
+  <line x1="615" y1="96" x2="615" y2="248" stroke="var(--oplog)" stroke-width="2"/>
+  <polygon points="615,256 610,246 620,246" fill="var(--oplog)"/>
+  <text x="623" y="222" font-size="11.5" fill="var(--oplog)" font-family="ui-monospace,Menlo,monospace">the op-log write</text>
+  <text x="623" y="237" font-size="11.5" fill="var(--oplog)" font-family="ui-monospace,Menlo,monospace">view + op + heads swap</text>
+
+  <!-- write 1: files, AFTER commit -->
+  <line x1="777" y1="96" x2="777" y2="320" stroke="var(--files)" stroke-width="2"/>
+  <polygon points="777,328 772,318 782,318" fill="var(--files)"/>
+  <text x="785" y="294" font-size="11.5" fill="var(--files)" font-family="ui-monospace,Menlo,monospace">write ① — materialize</text>
+  <text x="785" y="309" font-size="11.5" fill="var(--files)" font-family="ui-monospace,Menlo,monospace">the new @ tree</text>
+
+  <!-- write 2: state, AFTER commit, new op id -->
+  <line x1="906" y1="96" x2="906" y2="392" stroke="var(--state)" stroke-width="2"/>
+  <polygon points="906,400 901,390 911,390" fill="var(--state)"/>
+  <text x="898" y="366" font-size="11.5" fill="var(--state)" text-anchor="end" font-family="ui-monospace,Menlo,monospace">write ② — record the</text>
+  <text x="898" y="381" font-size="11.5" fill="var(--state)" text-anchor="end" font-family="ui-monospace,Menlo,monospace">NEW operation id</text>
+
+  <!-- new op id feedback: op store -> finish -->
+  <path d="M 660 256 C 720 256 850 250 898 100" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 4" fill="none"/>
+  <text x="726" y="243" font-size="10.5" fill="var(--muted)" font-family="ui-monospace,Menlo,monospace">repo.op_id() flows forward</text>
+</svg>
+</div>
+<figcaption>One <code>gt create</code>, four stores. The writes are numbered ①②③ by the talk’s framing — but they execute ③, commit, ①, ② : git refs must be recorded <em>inside</em> the same operation, while the working copy needs the operation id that only exists <em>after</em> commit. (<code>Workspace::check_out</code> bundles ① and ② in one call.)</figcaption>
+</figure>
+
+<div class="writes">
+  <div class="write-card" style="--c: var(--git)">
+    <span class="tag">write ③ · git refs</span>
+    <div class="api">git::reset_head → git::export_refs</div>
+    <p>On <code>tx.repo_mut()</code>, <em>before</em> commit — export mutates the view’s record of what git holds, so it must land in the same operation.</p>
+  </div>
+  <div class="write-card" style="--c: var(--oplog)">
+    <span class="tag">the op log</span>
+    <div class="api">tx.commit(description)</div>
+    <p>Writes the view blob, the operation, the index, and swaps op heads. Touches nothing else — provably: <code>transaction.rs</code> imports no workspace or git module.</p>
+  </div>
+  <div class="write-card" style="--c: var(--files)">
+    <span class="tag">write ① · files</span>
+    <div class="api">locked_wc.check_out(&amp;new_wc)</div>
+    <p>Diffs old tree → new tree and rewrites the worktree. Skipped bytes-for-bytes when trees match — but never skip the call.</p>
+  </div>
+  <div class="write-card" style="--c: var(--state)">
+    <span class="tag">write ② · workspace state</span>
+    <div class="api">locked_ws.finish(repo.op_id())</div>
+    <p>Persists “this workspace is at operation X, tree Y”. The op id must be the <em>new</em> one — the old id silently re-records staleness.</p>
+  </div>
+</div>
+
+<h2><span class="sec">02</span> · What each gt command writes</h2>
+<div class="matrix-wrap">
+<table class="matrix">
+  <thead><tr>
+    <th>command</th><th>operations</th><th>git refs</th><th>files</th><th>wc state</th><th>network</th>
+  </tr></thead>
+  <tbody>
+    <tr><td class="cmd">gt init</td><td class="ops">3 — workspace · import refs · import head</td>
+      <td><span class="dot d-git"></span>HEAD reset</td>
+      <td class="no">reset (state only)</td>
+      <td><span class="dot d-state"></span>adopt HEAD</td><td class="no">—</td></tr>
+    <tr><td class="cmd">gt checkout</td><td class="ops">1–2 — snapshot? · checkout</td>
+      <td><span class="dot d-git"></span>HEAD follows @</td>
+      <td><span class="dot d-files"></span>tree swap</td>
+      <td><span class="dot d-state"></span></td><td class="no">—</td></tr>
+    <tr><td class="cmd">gt create</td><td class="ops">1–2 — snapshot? · create</td>
+      <td><span class="dot d-git"></span>new refs/heads/*</td>
+      <td class="no">no-op (same tree)</td>
+      <td><span class="dot d-state"></span></td><td class="no">—</td></tr>
+    <tr><td class="cmd">gt modify</td><td class="ops">2 — snapshot · amend</td>
+      <td><span class="dot d-git"></span>branch ref moves</td>
+      <td><span class="dot d-files"></span>if conflicts materialize</td>
+      <td><span class="dot d-state"></span></td><td class="no">—</td></tr>
+    <tr><td class="cmd">gt submit</td><td class="ops">1–2 — snapshot? · push</td>
+      <td><span class="dot d-git"></span>refs/remotes/* move</td>
+      <td class="no">—</td>
+      <td><span class="dot d-state"></span></td>
+      <td><span class="dot d-net"></span>push + PR API</td></tr>
+    <tr><td class="cmd">gt sync</td><td class="ops">1–2 — snapshot? · fetch+restack</td>
+      <td><span class="dot d-git"></span>branches rewritten</td>
+      <td><span class="dot d-files"></span>restacked @</td>
+      <td><span class="dot d-state"></span></td>
+      <td><span class="dot d-net"></span>fetch</td></tr>
+  </tbody>
+</table>
+</div>
+<p style="font-size:.85rem; color: var(--muted)">“snapshot?” = <em>write zero</em>: folding dirty files into <code>@</code> is its own operation, committed before the command even starts. In a colocated repo write zero also <em>imports git’s own writes</em> — <code>import_head</code> before the snapshot (a raw <code>git commit</code> moved HEAD and the files), <code>import_refs</code> after — or external git activity silently corrupts the fold. And even a push or a fetch is an op-log write, because it moves remote-tracking bookmarks in the view.</p>
+
+<h2><span class="sec">03</span> · Skip a write, get a broken repo</h2>
+<div class="fails">
+  <div class="fail" style="--c: var(--files)">
+    <b>skip ① check_out</b>
+    <p>The op log says @ moved; the disk still shows the old tree. The next snapshot absorbs the difference into the <em>wrong</em> commit — silent history corruption.</p>
+  </div>
+  <div class="fail" style="--c: var(--state)">
+    <b>skip ② finish</b>
+    <p>The workspace still records the old operation. Every later command opens with “stale working copy” — this is exactly what <code>WorkingCopyFreshness::check_stale</code> exists to catch.</p>
+  </div>
+  <div class="fail" style="--c: var(--git)">
+    <b>skip ③ export_refs</b>
+    <p>jj bookmarks and <code>.git/refs/heads</code> silently diverge. <code>git log</code> lies to the user; the next import surfaces the drift as ref conflicts.</p>
+  </div>
+</div>
+
+<h2><span class="sec">04</span> · The epilogue, in code</h2>
+<pre><code><span class="c-cmt">// every mutating command ends here — jj-lib 0.45.1, blocked on with pollster</span>
+tx.repo_mut().rebase_descendants().block_on()?;        <span class="c-cmt">// or commit() panics</span>
+<span class="c-git">git::reset_head(tx.repo_mut(), &amp;ws_name, &amp;root, &amp;new_wc).block_on()?;</span>
+<span class="c-git">git::export_refs(tx.repo_mut())?;                      // write ③ — inside the tx</span>
+<span class="c-oplog">let repo = tx.commit(desc).block_on()?;                // the op-log write</span>
+<span class="c-files">workspace.check_out(repo.op_id().clone(),              // write ① — files…</span>
+<span class="c-state">    Some(&amp;old_tree), &amp;new_wc).block_on()?;             // …and write ② — state</span></code></pre>
+
+<footer>
+  gt — a Graphite-style stacked-PR CLI on jj-lib 0.45.1 · run any command with <code>--explain</code> to watch these writes live · JJCon
+</footer>
+</main>
