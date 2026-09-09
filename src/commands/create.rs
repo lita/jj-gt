@@ -36,7 +36,7 @@ pub fn run(gt: &mut Gt, message: &str, _all: bool) -> Result<()> {
     }
 
     let ws_name = gt.ws_name();
-    let mut tx = gt.repo.start_transaction();
+    let mut tx = gt.start_tx();
     // 1. Give @ its commit message (a rewrite: same change id, new commit id).
     let described = tx
         .repo_mut()

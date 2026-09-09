@@ -65,6 +65,12 @@ every command (its own operation) — skip it and every command sees a stale `@`
   (`commit(root).descendants()`, streamed children-first), no parser needed
 - `src/commands/ops.rs` — `gt ops` shows how many operations one "command"
   really is
+- `src/commands/undo.rs` — `gt undo` rolls back a whole command *including its
+  snapshot*. jj-lib has no undo API and `jj undo` peels one operation at a time,
+  so this is pure engine code: every gt transaction is stamped with a per-command
+  id (`Transaction::set_attribute`), and undo restores the view from just before
+  that whole group. Undo/redo toggle, fully reversible via the op log — and undo
+  is itself three writes (it runs the same `finish_tx` epilogue)
 
 The verified API research (exact 0.45.1 signatures with file:line references)
 lives in `.claude/research-notes-0.45.md`.
@@ -111,6 +117,11 @@ gt ops                            # every "command" was 1-3 operations
 
 # interop: it's all one repo
 jj log                            # the real jj CLI reads gt's writes perfectly
+
+# undo a whole gt command — snapshot included — because the op log makes it easy
+gt create --all -m "feat: oops"
+gt --explain undo                 # branch AND the file vanish (one command, its
+                                  # own op group); run `gt undo` again to redo
 ```
 
 ## Build

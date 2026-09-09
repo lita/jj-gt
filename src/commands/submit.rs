@@ -75,7 +75,7 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
     }
     if !bookmarks.is_empty() {
         let n = bookmarks.len();
-        let mut tx = gt.repo.start_transaction();
+        let mut tx = gt.start_tx();
         let options = subprocess_options(&gt.settings, askpass)?;
         ex.net(&format!(
             "git push --force-with-lease {} branch(es) → {}",

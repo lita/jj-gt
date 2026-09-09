@@ -29,7 +29,7 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
     // Compute the stack BEFORE fetching, against the old trunk.
     let entries = current_stack(gt)?;
 
-    let mut tx = gt.repo.start_transaction();
+    let mut tx = gt.start_tx();
 
     // ── fetch + import: the network write, then the view write ──
     let mut auto_track = HashMap::new();

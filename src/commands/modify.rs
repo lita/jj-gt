@@ -31,7 +31,7 @@ pub fn run(gt: &mut Gt, _all: bool) -> Result<()> {
         .map(|(name, _)| name.to_owned())
         .next();
 
-    let mut tx = gt.repo.start_transaction();
+    let mut tx = gt.start_tx();
     // Amend: the branch commit takes @'s tree (trees are snapshots, so the
     // squash is just "use the child's tree"). The bookmark follows the rewrite
     // and sibling descendants rebase automatically. @ itself is ABANDONED, not

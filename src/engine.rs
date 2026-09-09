@@ -36,6 +36,10 @@ use crate::explain::Explain;
 use crate::state::GtState;
 use crate::util::short;
 
+/// Operation-metadata attribute stamping every op a gt command creates, so
+/// `gt undo` can roll back a whole command (snapshot included) as one group.
+pub const CMD_ID_ATTR: &str = "gt-command-id";
+
 pub struct Gt {
     pub workspace: Workspace,
     pub repo: Arc<ReadonlyRepo>,
@@ -43,6 +47,8 @@ pub struct Gt {
     pub state: GtState,
     pub explain: Explain,
     pub root: PathBuf,
+    /// Unique id for this gt invocation; stamped on every operation it commits.
+    pub cmd_id: String,
 }
 
 /// Walk up from `cwd` to find the workspace root (the dir containing .jj).
@@ -75,6 +81,11 @@ impl Gt {
         // know happens.
         let repo = workspace.repo_loader().load_at_head().block_on()?;
         let state = GtState::load(&root)?;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let cmd_id = format!("{}-{nanos}", std::process::id());
         Ok(Gt {
             workspace,
             repo,
@@ -82,7 +93,15 @@ impl Gt {
             state,
             explain,
             root,
+            cmd_id,
         })
+    }
+
+    /// Start a transaction stamped with this command's id (see CMD_ID_ATTR).
+    pub fn start_tx(&self) -> Transaction {
+        let mut tx = self.repo.start_transaction();
+        tx.set_attribute(CMD_ID_ATTR.to_string(), self.cmd_id.clone());
+        tx
     }
 
     pub fn ws_name(&self) -> WorkspaceNameBuf {
@@ -138,7 +157,7 @@ impl Gt {
     fn import_git_head(&mut self) -> Result<()> {
         let ex = self.explain;
         let name = self.ws_name();
-        let mut tx = self.repo.start_transaction();
+        let mut tx = self.start_tx();
         git::import_head(tx.repo_mut(), &name, &self.root).block_on()?;
         if !tx.repo().has_changes() {
             return Ok(());
@@ -167,7 +186,7 @@ impl Gt {
     /// Import git refs after snapshotting — branches moved by other tools
     /// become visible to jj (and may rebase @, hence the full epilogue).
     fn import_git_refs(&mut self) -> Result<()> {
-        let mut tx = self.repo.start_transaction();
+        let mut tx = self.start_tx();
         let stats = git::import_refs(tx.repo_mut(), &self.import_options()).block_on()?;
         if !tx.repo().has_changes() {
             return Ok(());
@@ -283,7 +302,10 @@ impl Gt {
         }
         if new_tree.tree_ids_and_labels() != wc_commit.tree().tree_ids_and_labels() {
             ex.note("working copy differs from @ — folding files into the wc commit");
+            // Field-precise borrow (locked_ws holds &mut self.workspace, so
+            // the whole-self start_tx() helper can't be used here).
             let mut tx = self.repo.start_transaction();
+            tx.set_attribute(CMD_ID_ATTR.to_string(), self.cmd_id.clone());
             tx.set_is_snapshot(true);
             let new_wc = tx
                 .repo_mut()

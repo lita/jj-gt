@@ -57,6 +57,8 @@ enum Command {
     Log,
     /// Show the operation log tail.
     Ops,
+    /// Roll back the last gt command — snapshot included.
+    Undo,
 }
 
 fn main() {
@@ -112,6 +114,10 @@ fn run() -> Result<()> {
         Command::Ops => {
             let gt = engine::Gt::load(&cwd, explain)?;
             commands::ops::run(&gt)
+        }
+        Command::Undo => {
+            let mut gt = engine::Gt::load(&cwd, explain)?;
+            commands::undo::run(&mut gt)
         }
     }
 }
