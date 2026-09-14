@@ -19,6 +19,12 @@ pub fn run(gt: &mut Gt, _all: bool) -> Result<()> {
         .first()
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("working-copy commit has no parent"))?;
+    if parent_id == *gt.repo.store().root_commit_id() {
+        bail!(
+            "working copy is based on jj's root commit, not a branch — \
+             run `gt sync` or `gt checkout <branch>` to recover"
+        );
+    }
     let trunk_id = gt.trunk_id()?;
     if parent_id == trunk_id {
         bail!("@ sits directly on {} — use `gt create` to start a branch", gt.state.trunk);
