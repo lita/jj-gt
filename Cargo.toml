@@ -5,6 +5,10 @@ edition = "2024"
 description = "A Graphite-style stacked-PR CLI built on jj-lib — demo for the JJCon talk \"Three Writes, Not One\""
 publish = false
 
+[[bin]]
+name = "jj-gt"
+path = "src/main.rs"
+
 [dependencies]
 jj-lib = "0.45.1"
 clap = { version = "4", features = ["derive"] }

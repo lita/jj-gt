@@ -79,7 +79,7 @@ pub fn branch_entries(entries: &[StackEntry]) -> Result<Vec<(&StackEntry, RefNam
         match &entry.bookmark {
             Some(name) => out.push((entry, name.clone())),
             None => bail!(
-                "commit {} ({:?}) has no bookmark — create stack commits with `gt create`",
+                "commit {} ({:?}) has no bookmark — create stack commits with `jj-gt create`",
                 crate::util::short(&jj_lib::object_id::ObjectId::hex(entry.commit.id())),
                 entry.commit.description().lines().next().unwrap_or("")
             ),

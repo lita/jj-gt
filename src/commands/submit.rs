@@ -28,7 +28,7 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
     let entries = current_stack(gt)?;
     let branches = branch_entries(&entries)?;
     if branches.is_empty() {
-        bail!("nothing to submit — the stack is empty (use `gt create` first)");
+        bail!("nothing to submit — the stack is empty (use `jj-gt create` first)");
     }
     // jj git push refuses these too: conflicted trees would push materialized
     // .jjconflict-* directories to GitHub.
@@ -102,7 +102,7 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
             );
         }
         if !stats.all_ok() {
-            bail!("push failed — the jj view was left untouched; re-run after `gt sync`");
+            bail!("push failed — the jj view was left untouched; re-run after `jj-gt sync`");
         }
         for name in &stats.pushed {
             println!("{} pushed {}", "✓".green(), name.as_str());

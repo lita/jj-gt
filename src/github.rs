@@ -1,4 +1,4 @@
-//! Minimal GitHub REST client for the stacked-PR half of `gt submit`/`gt sync`.
+//! Minimal GitHub REST client for the stacked-PR half of `jj-gt submit`/`jj-gt sync`.
 //! jj-lib is not involved here — pushing the branches is jj-lib's job, turning
 //! them into a PR stack is plain HTTPS.
 

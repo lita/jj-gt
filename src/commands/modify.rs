@@ -22,12 +22,12 @@ pub fn run(gt: &mut Gt, _all: bool) -> Result<()> {
     if parent_id == *gt.repo.store().root_commit_id() {
         bail!(
             "working copy is based on jj's root commit, not a branch — \
-             run `gt sync` or `gt checkout <branch>` to recover"
+             run `jj-gt sync` or `jj-gt checkout <branch>` to recover"
         );
     }
     let trunk_id = gt.trunk_id()?;
     if parent_id == trunk_id {
-        bail!("@ sits directly on {} — use `gt create` to start a branch", gt.state.trunk);
+        bail!("@ sits directly on {} — use `jj-gt create` to start a branch", gt.state.trunk);
     }
     let parent = gt.repo.store().get_commit(&parent_id)?;
     let branch = gt

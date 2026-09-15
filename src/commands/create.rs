@@ -15,7 +15,7 @@ pub fn run(gt: &mut Gt, message: &str, _all: bool) -> Result<()> {
     gt.snapshot()?;
     let wc = gt.wc_commit()?;
     if wc.is_empty(gt.repo.as_ref()).block_on()? {
-        bail!("no changes in the working copy — edit some files before `gt create`");
+        bail!("no changes in the working copy — edit some files before `jj-gt create`");
     }
 
     // Graphite-style generated branch name.

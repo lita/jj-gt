@@ -37,7 +37,7 @@ use crate::state::GtState;
 use crate::util::short;
 
 /// Operation-metadata attribute stamping every op a gt command creates, so
-/// `gt undo` can roll back a whole command (snapshot included) as one group.
+/// `jj-gt undo` can roll back a whole command (snapshot included) as one group.
 pub const CMD_ID_ATTR: &str = "gt-command-id";
 
 pub struct Gt {
@@ -60,7 +60,7 @@ pub fn find_workspace_root(cwd: &Path) -> Result<PathBuf> {
         }
         match dir.parent() {
             Some(parent) => dir = parent,
-            None => bail!("no .jj repo found above {} — run `gt init` first", cwd.display()),
+            None => bail!("no .jj repo found above {} — run `jj-gt init` first", cwd.display()),
         }
     }
 }

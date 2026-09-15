@@ -5,7 +5,7 @@
 //! stamped every operation with a per-command id (CMD_ID_ATTR): undo finds the
 //! newest command group and restores the view from just before it.
 //!
-//! Because an undo is itself a command group, running `gt undo` again restores
+//! Because an undo is itself a command group, running `jj-gt undo` again restores
 //! to *its* parent — i.e. undo and redo toggle. Simple, fully reversible, and a
 //! nice demo of why the op log makes this tractable. (The real jj CLI walks
 //! strictly backward on repeat and has a separate `redo`; we favor the toggle.)
@@ -24,7 +24,7 @@ use pollster::FutureExt as _;
 use crate::engine::{CMD_ID_ATTR, Gt};
 use crate::util::short;
 
-/// Encoded in the op description so a human reading `jj op log` / `gt ops` can
+/// Encoded in the op description so a human reading `jj op log` / `jj-gt ops` can
 /// see what an undo restored to. Not parsed for logic.
 const UNDO_DESC_PREFIX: &str = "gt undo: restore to operation ";
 
@@ -72,7 +72,7 @@ pub fn run(gt: &mut Gt) -> Result<()> {
         if desc.contains("push") {
             eprintln!(
                 "{} undoing a push only rewinds jj's record of the remote — \
-                 GitHub still has the pushed refs; run `gt sync` before the next submit",
+                 GitHub still has the pushed refs; run `jj-gt sync` before the next submit",
                 "!".yellow().bold()
             );
         }
