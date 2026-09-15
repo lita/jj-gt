@@ -77,6 +77,9 @@ lives in `.claude/research-notes-0.45.md`.
 
 ## Demo script
 
+For a separate shared-branch commit-loss comparison with Graphite, see
+[the commit-loss demo](docs/commit-loss-demo.md).
+
 ```sh
 # setup (once): a scratch GitHub repo + auth
 gh repo create gt-demo-jjcon --private --add-readme --clone && cd gt-demo-jjcon
