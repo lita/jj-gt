@@ -1,4 +1,4 @@
-//! gt submit: push every stack branch (force-with-lease) and create/update the
+//! jj-gt submit: push every stack branch (force-with-lease) and create/update the
 //! stacked PRs on GitHub.
 //!
 //! The push itself is a jj-lib operation: push_refs mutates the view's
@@ -109,7 +109,7 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
         }
         // push_refs already updated the view's remote-tracking bookmarks —
         // committing the transaction is what makes that an operation.
-        gt.finish_tx(tx, "gt submit: push stack")?;
+        gt.finish_tx(tx, "jj-gt submit: push stack")?;
     } else {
         println!("All branches already up to date on {}", remote.as_str());
     }
@@ -170,7 +170,7 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
             body.push_str(&format!("- #{other_number}{marker}\n"));
         }
         body.push_str(&format!("- `{}` (trunk)\n", gt.state.trunk));
-        body.push_str("\n*stacked with [gt](https://github.com/jj-vcs/jj) on jj-lib*\n");
+        body.push_str("\n*stacked with [jj-gt](https://github.com/jj-vcs/jj) on jj-lib*\n");
         gh.update_pr(*number, None, Some(&body))?;
     }
 

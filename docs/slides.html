@@ -220,10 +220,10 @@
           <text x="45" y="80" fill="var(--muted)" font-size="10">"import git head"</text>
           <rect x="270" y="40" width="180" height="52" rx="8" fill="var(--surface)" stroke="var(--line)"/>
           <text x="285" y="62" fill="var(--ink)">op 10c40bc1</text>
-          <text x="285" y="80" fill="var(--muted)" font-size="10">"gt create …"</text>
+          <text x="285" y="80" fill="var(--muted)" font-size="10">"jj-gt create …"</text>
           <rect x="510" y="40" width="180" height="52" rx="8" fill="var(--surface)" stroke="var(--oplog)" stroke-width="1.5"/>
           <text x="525" y="62" fill="var(--oplog)">op c0a849dc  @</text>
-          <text x="525" y="80" fill="var(--muted)" font-size="10">"gt submit: push stack"</text>
+          <text x="525" y="80" fill="var(--muted)" font-size="10">"jj-gt submit: push stack"</text>
           <line x1="270" y1="66" x2="212" y2="66" stroke="var(--muted)" marker-end="url(#a6)"/>
           <line x1="510" y1="66" x2="452" y2="66" stroke="var(--muted)" marker-end="url(#a6)"/>
           <text x="230" y="58" fill="var(--muted)" font-size="10">parent</text>
@@ -279,7 +279,7 @@
       <p class="dim mono" style="font-size:.78rem">written by: git::export_refs · git::reset_head</p>
     </div>
   </div>
-  <p class="receipt">Four stores, four writers, zero automatic synchronization. Every gt command reconciles all four.</p>
+  <p class="receipt">Four stores, four writers, zero automatic synchronization. Every jj-gt command reconciles all four.</p>
 </div></section>
 
 <!-- 8 · working_copy zoom -->
@@ -309,7 +309,7 @@ type         <span class="dim">← "local" (which working-copy backend)</span></
 tx.repo_mut()…                        <span class="dim">// mutate the in-memory view: new commits,</span>
                                       <span class="dim">// bookmarks, wc pointer, rebases</span>
 tx.repo_mut().rebase_descendants().block_on()?;   <span class="c-bad">// forget this → panic</span>
-<span class="c-oplog">let repo = tx.commit("gt create …").block_on()?;  // writes: view + operation</span>
+<span class="c-oplog">let repo = tx.commit("jj-gt create …").block_on()?;  // writes: view + operation</span>
 <span class="c-oplog">                                      //         + index + op-heads swap</span></code></pre>
   <ul>
     <li><code>commit()</code> returns a <strong>new</strong> <code>Arc&lt;ReadonlyRepo&gt;</code> — the old one is stale; its <code>op_id()</code> feeds write 2</li>
@@ -325,7 +325,7 @@ tx.repo_mut().rebase_descendants().block_on()?;   <span class="c-bad">// forget 
   <h2>Snapshot: write zero, before every command</h2>
   <p class="lede">The working copy <strong>is a commit</strong> (@). The disk is its source of truth — until someone folds the disk back into it.</p>
   <ul>
-    <li><strong>When:</strong> at the start of <em>every</em> command — even <code>gt log</code>. Skip it and everything sees a stale @</li>
+    <li><strong>When:</strong> at the start of <em>every</em> command — even <code>jj-gt log</code>. Skip it and everything sees a stale @</li>
     <li><strong>How:</strong> take the wc lock → <code>check_stale</code> → walk the disk (stat cache) → if changed, <code>rewrite_commit(&amp;wc).set_tree(…)</code> in its <strong>own operation</strong> → <code>finish(op_id)</code> — always</li>
     <li><strong>Why its own operation:</strong> undoing the command keeps your edits; a crash mid-command loses nothing</li>
     <li><strong>Colocated bonus:</strong> write zero also means <em>adopting git's writes</em> — <code>import_head</code> before the snapshot, <code>import_refs</code> after. One raw <code>git commit</code> is otherwise silently mis-folded, forever</li>
@@ -373,7 +373,7 @@ tx.repo_mut().rebase_descendants().block_on()?;   <span class="c-bad">// forget 
 <section class="slide"><div class="inner">
   <p class="eyebrow">02 · shape of a command</p>
   <h2>A "read" command still writes</h2>
-  <pre><code>gt log:  load → import git head/refs → <span class="c-files">snapshot</span> → <span class="c-state">finish(op)</span> → evaluate revsets → print</code></pre>
+  <pre><code>jj-gt log:  load → import git head/refs → <span class="c-files">snapshot</span> → <span class="c-state">finish(op)</span> → evaluate revsets → print</code></pre>
   <table>
     <thead><tr><th></th><th>write (create, sync…)</th><th>read (log, ops)</th></tr></thead>
     <tbody>
@@ -386,10 +386,10 @@ tx.repo_mut().rebase_descendants().block_on()?;   <span class="c-bad">// forget 
   <p class="receipt">Even a fetch or a push is an op-log write — they move remote-tracking bookmarks in the view.</p>
 </div></section>
 
-<!-- 13 · section: gt -->
+<!-- 13 · section: jj-gt -->
 <section class="slide"><div class="inner">
   <p class="eyebrow">03</p>
-  <h1>gt: Graphite on jj-lib</h1>
+  <h1>jj-gt: Graphite on jj-lib</h1>
   <div class="cols">
     <div>
       <p class="lede">A stacked-PR CLI in ~1500 lines: <code>init · checkout · create · modify · submit · sync · log · ops · undo</code></p>
@@ -399,7 +399,7 @@ tx.repo_mut().rebase_descendants().block_on()?;   <span class="c-bad">// forget 
         <li>the interesting commands: <strong>submit</strong> and <strong>sync</strong></li>
       </ul>
     </div>
-    <pre class="term"><code>$ gt log
+    <pre class="term"><code>$ jj-gt log
 
 <span class="c-git">◉</span>  1b9c34fe  <span class="dim">(working copy — empty)</span>  <span class="c-git">← you are here</span>
 <span class="c-oplog">◯  lita/feat-api-add-pagination</span>  <span class="c-files">#2</span>  60eb7d2c
@@ -443,7 +443,7 @@ tx.repo_mut().rebase_descendants().block_on()?;   <span class="c-bad">// forget 
 
 <!-- 15 · sync with jj-lib -->
 <section class="slide"><div class="inner">
-  <p class="eyebrow">03 · gt sync</p>
+  <p class="eyebrow">03 · jj-gt sync</p>
   <h2>Restacking with jj-lib: one transaction</h2>
   <figure>
     <svg viewBox="0 0 900 150" role="img" aria-label="With jj-lib the whole restack happens in one transaction in memory: fetch and import, rebase commits with conflicts materializing as data, bookmarks and the working copy follow, then a single checkout at the end.">
@@ -457,7 +457,7 @@ tx.repo_mut().rebase_descendants().block_on()?;   <span class="c-bad">// forget 
         <line x1="650" y1="62" x2="700" y2="62" stroke="var(--muted)"/><polygon points="708,62 698,57 698,67" fill="var(--muted)"/>
         <rect x="712" y="44" width="150" height="36" rx="6" fill="var(--files)" opacity=".85"/><text x="787" y="66" text-anchor="middle" fill="#0c2530">checkout — once</text>
         <text x="10" y="128" fill="var(--files)" font-size="10.5">count the cyan boxes: N with git, 1 with jj-lib</text>
-        <text x="440" y="128" fill="var(--oplog)" font-size="10.5">one operation → `gt undo` reverts the whole sync</text>
+        <text x="440" y="128" fill="var(--oplog)" font-size="10.5">one operation → `jj-gt undo` reverts the whole sync</text>
       </g>
     </svg>
   </figure>

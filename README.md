@@ -13,15 +13,18 @@ consumer's job, and `jj-gt` reimplements it visibly. Run any command with
 `--explain` to watch the writes happen:
 
 ```text
-── the three writes — gt create lita/feat-api-...
+── writes — jj-gt create lita/feat-api-...
    ▸ git refs         .git HEAD ⇒ detached at parent of @; index rebuilt
    ▸ git refs         .git/refs/heads/* now mirror jj bookmarks (export_refs)
-   ▸ op log           tx.commit("gt create ...") → operation 10c40bc167a2
+   ▸ op log           tx.commit("jj-gt create ...") → operation 10c40bc167a2
    ▸ working copy     check_out: 0 added, 0 updated, 0 removed on disk
    ▸ workspace state  .jj/working_copy ← operation 10c40bc167a2
 ```
 
 ## The three writes (plus the one everyone knows)
+
+These are three categories of writes beyond the op-log commit, not a count of
+individual writes or lines in the `--explain` output.
 
 | write                  | what                                                    | API                                                     | when                                     |
 | ---------------------- | ------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------- |

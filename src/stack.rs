@@ -53,7 +53,7 @@ pub fn current_stack(gt: &Gt) -> Result<Vec<StackEntry>> {
             .local_bookmarks_for_commit(commit.id())
             .map(|(name, _)| name.to_owned())
             .find(|name| **name != *gt.trunk());
-        // Scratch commits: empty, undescribed, unbookmarked tips (gt keeps one
+        // Scratch commits: empty, undescribed, unbookmarked tips (jj-gt keeps one
         // as @; abandoned ones may linger briefly mid-command).
         let is_scratch = bookmark.is_none()
             && commit.description().is_empty()
@@ -68,7 +68,7 @@ pub fn current_stack(gt: &Gt) -> Result<Vec<StackEntry>> {
 }
 
 /// The stack entries that represent branches (described commits, bottom-up).
-/// Errors if a non-scratch commit has no bookmark — gt-created stacks always
+/// Errors if a non-scratch commit has no bookmark — jj-gt-created stacks always
 /// bookmark every commit.
 pub fn branch_entries(entries: &[StackEntry]) -> Result<Vec<(&StackEntry, RefNameBuf)>> {
     let mut out = Vec::new();

@@ -36,7 +36,7 @@ use crate::explain::Explain;
 use crate::state::GtState;
 use crate::util::short;
 
-/// Operation-metadata attribute stamping every op a gt command creates, so
+/// Operation-metadata attribute stamping every op a jj-gt command creates, so
 /// `jj-gt undo` can roll back a whole command (snapshot included) as one group.
 pub const CMD_ID_ATTR: &str = "gt-command-id";
 
@@ -47,7 +47,7 @@ pub struct Gt {
     pub state: GtState,
     pub explain: Explain,
     pub root: PathBuf,
-    /// Unique id for this gt invocation; stamped on every operation it commits.
+    /// Unique id for this jj-gt invocation; stamped on every operation it commits.
     pub cmd_id: String,
 }
 
@@ -162,7 +162,7 @@ impl Gt {
         if !tx.repo().has_changes() {
             return Ok(());
         }
-        ex.note("git HEAD moved outside gt — adopting it (import_head)");
+        ex.note("git HEAD moved outside jj-gt — adopting it (import_head)");
         if let Some(head_id) = tx.repo().view().git_head(&name).as_normal().cloned() {
             let head_commit = tx.repo().store().get_commit(&head_id)?;
             let new_wc = tx
@@ -172,13 +172,13 @@ impl Gt {
             tx.repo_mut().rebase_descendants().block_on()?;
             let mut locked_ws = self.workspace.start_working_copy_mutation().block_on()?;
             locked_ws.locked_wc().reset(&new_wc).block_on()?;
-            self.repo = tx.commit("gt: import git head").block_on()?;
-            ex.op_log("gt: import git head", &self.repo.op_id().hex());
+            self.repo = tx.commit("jj-gt: import git head").block_on()?;
+            ex.op_log("jj-gt: import git head", &self.repo.op_id().hex());
             locked_ws.finish(self.repo.op_id().clone()).block_on()?;
             ex.workspace_state(&self.repo.op_id().hex());
         } else {
-            self.repo = tx.commit("gt: import git head").block_on()?;
-            ex.op_log("gt: import git head", &self.repo.op_id().hex());
+            self.repo = tx.commit("jj-gt: import git head").block_on()?;
+            ex.op_log("jj-gt: import git head", &self.repo.op_id().hex());
         }
         Ok(())
     }
@@ -192,11 +192,11 @@ impl Gt {
             return Ok(());
         }
         self.explain.note(&format!(
-            "git refs moved outside gt — imported {} bookmark change(s)",
+            "git refs moved outside jj-gt — imported {} bookmark change(s)",
             stats.changed_remote_bookmarks.len()
         ));
         tx.repo_mut().rebase_descendants().block_on()?;
-        self.finish_tx(tx, "gt: import git refs")?;
+        self.finish_tx(tx, "jj-gt: import git refs")?;
         Ok(())
     }
 
@@ -281,7 +281,7 @@ impl Gt {
                 let stats = locked_ws.locked_wc().check_out(&wc_commit).block_on()?;
                 ex.working_copy(stats.added_files, stats.updated_files, stats.removed_files);
                 eprintln!(
-                    "gt: healed stale working copy (now at op {})",
+                    "jj-gt: healed stale working copy (now at op {})",
                     short(&self.repo.op_id().hex())
                 );
             }
@@ -298,7 +298,7 @@ impl Gt {
         };
         let (new_tree, snapshot_stats) = locked_ws.locked_wc().snapshot(&options).block_on()?;
         for (path, reason) in &snapshot_stats.untracked_paths {
-            eprintln!("gt: warning: not tracking {}: {reason:?}", path.as_internal_file_string());
+            eprintln!("jj-gt: warning: not tracking {}: {reason:?}", path.as_internal_file_string());
         }
         if new_tree.tree_ids_and_labels() != wc_commit.tree().tree_ids_and_labels() {
             ex.note("working copy differs from @ — folding files into the wc commit");
@@ -321,8 +321,8 @@ impl Gt {
                 .block_on()?;
             let export_stats = git::export_refs(tx.repo_mut())?;
             report_export(&export_stats);
-            self.repo = tx.commit("gt: snapshot working copy").block_on()?;
-            ex.op_log("gt: snapshot working copy", &self.repo.op_id().hex());
+            self.repo = tx.commit("jj-gt: snapshot working copy").block_on()?;
+            ex.op_log("jj-gt: snapshot working copy", &self.repo.op_id().hex());
         } else {
             ex.note("working copy clean — no snapshot operation needed");
         }
@@ -336,7 +336,7 @@ impl Gt {
         Ok(())
     }
 
-    /// The epilogue every mutating gt command shares — the jj CLI's
+    /// The epilogue every mutating jj-gt command shares — the jj CLI's
     /// finish_transaction, reimplemented. Returns false if the transaction had
     /// no changes (and was dropped).
     pub fn finish_tx(&mut self, mut tx: Transaction, desc: &str) -> Result<bool> {
@@ -345,7 +345,7 @@ impl Gt {
             println!("Nothing changed.");
             return Ok(false);
         }
-        ex.section(&format!("the three writes — {desc}"));
+        ex.section(&format!("writes — {desc}"));
         tx.repo_mut().rebase_descendants().block_on()?;
 
         let name = self.ws_name();
@@ -374,7 +374,7 @@ impl Gt {
                     ex.git_refs(&format!(".git HEAD ⇒ detached at parent of @ ({parent}); index rebuilt"));
                 }
                 Err(git::GitResetHeadError::UpdateHeadRef(e)) => {
-                    eprintln!("gt: warning: git HEAD moved concurrently, not resetting it: {e}");
+                    eprintln!("jj-gt: warning: git HEAD moved concurrently, not resetting it: {e}");
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -445,7 +445,7 @@ impl Gt {
 
 fn report_export(stats: &git::GitExportStats) {
     for (symbol, reason) in &stats.failed_bookmarks {
-        eprintln!("gt: warning: could not export {symbol} to git: {reason:?}");
+        eprintln!("jj-gt: warning: could not export {symbol} to git: {reason:?}");
     }
 }
 
