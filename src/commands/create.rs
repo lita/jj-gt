@@ -1,4 +1,4 @@
-//! gt create -m <msg>: turn the working copy into a stack branch.
+//! jj-gt create -m <msg>: turn the working copy into a stack branch.
 //!
 //! jj model: @ already *is* a commit (snapshot made sure it holds the working
 //! copy). We describe it, bookmark it, and open a fresh empty @ on top.
@@ -45,17 +45,17 @@ pub fn run(gt: &mut Gt, message: &str, _all: bool) -> Result<()> {
         .write()
         .block_on()?;
     tx.repo_mut().rebase_descendants().block_on()?;
-    // 2. Bookmark it — this is the branch gt submit will push.
+    // 2. Bookmark it — this is the branch jj-gt submit will push.
     tx.repo_mut()
         .set_local_bookmark_target(RefName::new(&branch), RefTarget::normal(described.id().clone()));
     // 3. Fresh empty @ on top, so the next edits become the next stack entry.
     tx.repo_mut()
         .check_out(ws_name, &described)
         .block_on()?;
-    gt.finish_tx(tx, &format!("gt create {branch}"))?;
+    gt.finish_tx(tx, &format!("jj-gt create {branch}"))?;
     println!("Created branch {branch}");
     if let Err(e) = crate::commands::log::print_stack(gt) {
-        eprintln!("gt: note: could not render the stack: {e:#}");
+        eprintln!("jj-gt: note: could not render the stack: {e:#}");
     }
     Ok(())
 }

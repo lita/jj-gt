@@ -1,4 +1,4 @@
-//! gt ops: tail of the operation log — makes the hidden op-log writes visible.
+//! jj-gt ops: tail of the operation log — makes the hidden op-log writes visible.
 
 use anyhow::Result;
 use jj_lib::repo::ReadonlyRepo;

@@ -1,4 +1,4 @@
-//! gt sync: fetch trunk, drop merged branches, rebase the stack — the command
+//! jj-gt sync: fetch trunk, drop merged branches, rebase the stack — the command
 //! where jj's rebase machinery shines.
 //!
 //! Detection is two-tier:
@@ -41,7 +41,7 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
         // Commits whose remote branch disappeared (deleted after merge) get
         // abandoned during import.
         abandon_unreachable_commits: true,
-        // A force-pushed jj rewrite (for example, a collaborator's `gt
+        // A force-pushed jj rewrite (for example, a collaborator's `jj-gt
         // modify`) has the same change id as the commit it replaces. Preserve
         // that predecessor relationship so rebase_descendants() moves our
         // scratch working-copy commit onto the replacement instead of
@@ -158,7 +158,7 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
     // (mandatory before commit — jj-lib asserts).
     tx.repo_mut().rebase_descendants().block_on()?;
 
-    let changed = gt.finish_tx(tx, "gt sync")?;
+    let changed = gt.finish_tx(tx, "jj-gt sync")?;
 
     // Forget PR numbers for branches that no longer exist.
     for branch in &merged {
@@ -180,7 +180,7 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
         println!("{} {branch} has conflicts — resolve in the working copy", "!".red().bold());
     }
     if let Err(e) = crate::commands::log::print_stack(gt) {
-        eprintln!("gt: note: could not render the stack: {e:#}");
+        eprintln!("jj-gt: note: could not render the stack: {e:#}");
     }
     Ok(())
 }

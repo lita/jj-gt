@@ -1,4 +1,4 @@
-//! The `--explain` narrator: prints each of the writes gt performs, as it
+//! The `--explain` narrator: prints each of the writes jj-gt performs, as it
 //! performs them, so the audience can see that committing a jj transaction is
 //! only one of several coordinated writes.
 //!
@@ -20,7 +20,7 @@ impl Explain {
         Explain { on }
     }
 
-    /// A phase header, e.g. "snapshot working copy" or "gt create".
+    /// A phase header, e.g. "snapshot working copy" or "jj-gt create".
     pub fn section(&self, title: &str) {
         if self.on {
             eprintln!("{} {}", "──".dimmed(), title.bold().dimmed());

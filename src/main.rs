@@ -22,7 +22,7 @@ use crate::explain::Explain;
 #[derive(Parser)]
 #[command(name = "jj-gt", about = "stacked PRs on jj-lib (JJCon demo)")]
 struct Cli {
-    /// Narrate the three writes as they happen.
+    /// Narrate the writes as they happen.
     #[arg(long, global = true)]
     explain: bool,
     #[command(subcommand)]

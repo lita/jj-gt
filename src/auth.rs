@@ -27,7 +27,7 @@ esac
 /// any jj-lib fetch/push. Safe to call early in main (single-threaded).
 pub fn install(token: &str) -> Result<GitAuth> {
     let dir = tempfile::TempDir::new()?;
-    let script_path = dir.path().join("gt-askpass.sh");
+    let script_path = dir.path().join("jj-gt-askpass.sh");
     let mut f = std::fs::File::create(&script_path)?;
     f.write_all(ASKPASS_SCRIPT.as_bytes())?;
     f.set_permissions(std::fs::Permissions::from_mode(0o700))?;

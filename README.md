@@ -13,7 +13,7 @@ consumer's job, and `jj-gt` reimplements it visibly. Run any command with
 `--explain` to watch the writes happen:
 
 ```text
-── the three writes — gt create lita/feat-api-...
+── writes — gt create lita/feat-api-...
    ▸ git refs         .git HEAD ⇒ detached at parent of @; index rebuilt
    ▸ git refs         .git/refs/heads/* now mirror jj bookmarks (export_refs)
    ▸ op log           tx.commit("gt create ...") → operation 10c40bc167a2
@@ -22,6 +22,9 @@ consumer's job, and `jj-gt` reimplements it visibly. Run any command with
 ```
 
 ## The three writes (plus the one everyone knows)
+
+These are three categories of writes beyond the op-log commit, not a count of
+individual writes or lines in the `--explain` output.
 
 | write                  | what                                                    | API                                                     | when                                     |
 | ---------------------- | ------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------- |
@@ -65,8 +68,8 @@ every command (its own operation) — skip it and every command sees a stale `@`
   (`commit(root).descendants()`, streamed children-first), no parser needed
 - `src/commands/ops.rs` — `jj-gt ops` shows how many operations one "command"
   really is
-- `src/commands/undo.rs` — `jj-gt undo` rolls back a whole command *including its
-  snapshot*. jj-lib has no undo API and `jj undo` peels one operation at a time,
+- `src/commands/undo.rs` — `jj-gt undo` rolls back a whole command _including its
+  snapshot_. jj-lib has no undo API and `jj undo` peels one operation at a time,
   so this is pure engine code: every jj-gt transaction is stamped with a per-command
   id (`Transaction::set_attribute`), and undo restores the view from just before
   that whole group. Undo/redo toggle, fully reversible via the op log — and undo
@@ -76,6 +79,9 @@ The verified API research (exact 0.45.1 signatures with file:line references)
 lives in `.claude/research-notes-0.45.md`.
 
 ## Demo script
+
+For a separate shared-branch commit-loss comparison with Graphite, see
+[the commit-loss demo](docs/commit-loss-demo.md).
 
 ```sh
 # setup (once): a scratch GitHub repo + auth

@@ -21,9 +21,9 @@ fn git_config(key: &str) -> Option<String> {
 pub fn user_settings() -> Result<UserSettings> {
     let mut config = StackedConfig::with_defaults();
     let mut layer = ConfigLayer::empty(ConfigSource::User);
-    let name = git_config("user.name").unwrap_or_else(|| "gt demo".to_string());
-    let email = git_config("user.email").unwrap_or_else(|| "gt@example.invalid".to_string());
-    let username = std::env::var("USER").unwrap_or_else(|_| "gt".to_string());
+    let name = git_config("user.name").unwrap_or_else(|| "jj-gt demo".to_string());
+    let email = git_config("user.email").unwrap_or_else(|| "jj-gt@example.invalid".to_string());
+    let username = std::env::var("USER").unwrap_or_else(|_| "jj-gt".to_string());
     let hostname = std::process::Command::new("hostname")
         .output()
         .ok()

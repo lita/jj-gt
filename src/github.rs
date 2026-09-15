@@ -93,7 +93,7 @@ impl GitHub {
             .set("Authorization", &format!("Bearer {}", self.token))
             .set("Accept", "application/vnd.github+json")
             .set("X-GitHub-Api-Version", "2022-11-28")
-            .set("User-Agent", "gt-jjcon-demo");
+            .set("User-Agent", "jj-gt-jjcon-demo");
         let resp = match body {
             Some(json) => req.send_json(json),
             None => req.call(),
