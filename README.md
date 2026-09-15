@@ -13,13 +13,28 @@ consumer's job, and `jj-gt` reimplements it visibly. Run any command with
 `--explain` to watch the writes happen:
 
 ```text
-── writes — jj-gt create lita/feat-api
-   ▸ git refs         .git/HEAD ← detached at 3ff7c5e2 (was ae9ba8c3); .git/index ← tree of parent(@) (reset_head)
-   ▸ git refs         .git/refs/heads/* now mirror jj bookmarks (export_refs)
-   ▸ op log           tx.commit("jj-gt create lita/feat-api") → operation 9d7e90a66a99
+── Snapshot  save current file edits into @, recording an operation if the tree changed
+   · working copy differs from @ — folding files into the wc commit
+   ▸ git refs         .git/index rewritten; intent-to-add entries refreshed (update_intent_to_add)
+   · export_refs: no Git refs changed
+   ▸ op log           tx.commit("jj-gt: snapshot working copy") → operation f28d3c3ff259
+   ▸ workspace state  .jj/working_copy ← operation f28d3c3ff259
+── Transact  create or rewrite commits, choose the next @, and publish a new operation
+   ▸ git refs         .git/HEAD ← detached at 05e15704 (was 6d48e6ef); .git/index ← tree of parent(@) (reset_head)
+   ▸ git refs         .git/refs/heads/lita/feat-api: created at 05e15704 (export_refs)
+   ▸ op log           tx.commit("jj-gt create lita/feat-api") → operation cdbdcb5d905a
+── Sync/Finalize  check_out makes the files match that operation's @, then record its id in .jj/working_copy
    ▸ working copy     check_out: 0 added, 0 updated, 0 removed on disk
-   ▸ workspace state  .jj/working_copy ← operation 9d7e90a66a99
+   ▸ workspace state  .jj/working_copy ← operation cdbdcb5d905a
 ```
+
+The headers are the talk's three phases. **Snapshot** runs before every
+command and is its own operation (it also adopts anything git moved:
+`import_head` before the snapshot, `import_refs` after). **Transact** is the
+command's own transaction, from `Gt::start_tx` to `tx.commit`; write 3 lands
+inside it. **Sync/Finalize** is `Workspace::check_out`, which bundles writes 1
+and 2 with the new operation id. A command may run several transactions, and
+each one gets its own Transact and Sync/Finalize pair.
 
 Every `▸ git refs` line is a write *into* `.git` (`reset_head`, `export_refs`,
 `update_intent_to_add`). The reverse direction, `.git → jj` (`import_refs`,
@@ -27,6 +42,15 @@ Every `▸ git refs` line is a write *into* `.git` (`reset_head`, `export_refs`,
 Note that `reset_head` rewrites `.git/HEAD` only when `parent(@)` actually
 moved — right after `jj-gt init` it is still attached to `main`, and only the
 index is rebuilt; the line says which case you got.
+
+`export_refs` compares actual Git refs before and after the call: changed
+refs are listed with their old/new targets (or creation/deletion), while a
+no-op prints `· export_refs: no Git refs changed`. A snapshot rewrites `@`,
+but only moves a branch if a bookmark follows that rewrite or a rebased
+descendant. Edits in an unbookmarked scratch `@` leave branch refs alone.
+The `git refs` category also includes the index: `update_intent_to_add`
+rewrites it to refresh intent-to-add entries, even if none changed; it does
+not stage file contents.
 
 ## The three writes (plus the one everyone knows)
 

@@ -18,6 +18,7 @@ use jj_lib::str_util::StringExpression;
 use jj_lib::workspace::Workspace;
 use pollster::FutureExt as _;
 
+use crate::engine::export_refs;
 use crate::explain::Explain;
 use crate::state::GtState;
 use crate::util::{git_output, short};
@@ -60,6 +61,11 @@ pub fn run(cwd: &Path, explain: Explain) -> Result<()> {
         record_synthetic_predecessors: false,
         remote_auto_track_bookmarks: auto_track,
     };
+    ex.note(
+        "no Snapshot phase: the jj view is empty and git already wrote the files — \
+         nothing to fold into @",
+    );
+    ex.phase_transact();
     let mut tx = repo.start_transaction();
     let stats = git::import_refs(tx.repo_mut(), &import_options).block_on()?;
     ex.note(&format!(
@@ -67,17 +73,20 @@ pub fn run(cwd: &Path, explain: Explain) -> Result<()> {
         stats.changed_remote_bookmarks.len()
     ));
     let repo = if tx.repo().has_changes() {
-        git::export_refs(tx.repo_mut())?;
+        export_refs(tx.repo_mut(), ex)?;
         let repo = tx.commit("jj-gt init: import git refs").block_on()?;
         ex.op_log("jj-gt init: import git refs", &repo.op_id().hex());
+        ex.note("no Sync/Finalize: @ did not move — the next transaction records the op id");
         repo
     } else {
+        ex.note("transaction has no changes — dropped without publishing an operation");
         repo
     };
 
     // Operation 3: adopt git HEAD as the working-copy position. The files are
     // already on disk (git put them there), so the working copy gets `reset`
     // (state only), not `check_out` (which would rewrite every file).
+    ex.phase_transact();
     let mut tx = repo.start_transaction();
     git::import_head(tx.repo_mut(), &ws_name, &root).block_on()?;
     let head_target = tx.repo().view().git_head(&ws_name).as_normal().cloned();
@@ -101,6 +110,7 @@ pub fn run(cwd: &Path, explain: Explain) -> Result<()> {
         ex.reset_head(&old_git_head, &wc_commit.parent_ids()[0], &root_id);
         let repo = tx.commit("jj-gt init: import git head").block_on()?;
         ex.op_log("jj-gt init: import git head", &repo.op_id().hex());
+        ex.phase_finalize();
         let mut locked_ws = workspace.start_working_copy_mutation().block_on()?;
         locked_ws.locked_wc().reset(&wc_commit).block_on()?;
         ex.note(
@@ -113,6 +123,9 @@ pub fn run(cwd: &Path, explain: Explain) -> Result<()> {
         repo
     } else {
         // Repo with no commits yet: nothing to adopt.
+        ex.note(
+            "git HEAD is unborn — nothing to adopt, transaction dropped (no operation published)",
+        );
         drop(tx);
         repo
     };
@@ -135,6 +148,7 @@ pub fn run(cwd: &Path, explain: Explain) -> Result<()> {
     // every later command's trunk_id() resolves.
     let trunk_ref = jj_lib::ref_name::RefName::new(&trunk);
     let repo = if !repo.view().get_local_bookmark(trunk_ref).is_present() {
+        ex.phase_transact();
         ex.note(&format!("no {trunk} bookmark yet (empty repo) — creating an initial commit"));
         let mut tx = repo.start_transaction();
         let root_id = tx.repo().store().root_commit_id().clone();
@@ -154,10 +168,10 @@ pub fn run(cwd: &Path, explain: Explain) -> Result<()> {
         let old_git_head = tx.repo().view().git_head(&ws_name).clone();
         git::reset_head(tx.repo_mut(), &ws_name, &root, &new_wc).block_on()?;
         ex.reset_head(&old_git_head, &new_wc.parent_ids()[0], &root_id);
-        git::export_refs(tx.repo_mut())?;
-        ex.git_refs(&format!(".git/refs/heads/{trunk} ← initial commit (export_refs)"));
+        export_refs(tx.repo_mut(), ex)?;
         let repo = tx.commit("jj-gt init: create trunk").block_on()?;
         ex.op_log("jj-gt init: create trunk", &repo.op_id().hex());
+        ex.phase_finalize();
         let stats = workspace
             .check_out(repo.op_id().clone(), None, &new_wc)
             .block_on()?;
