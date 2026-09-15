@@ -1,4 +1,4 @@
-//! gt modify: amend the working-copy changes into the current branch commit
+//! jj-gt modify: amend the working-copy changes into the current branch commit
 //! (the parent of the scratch @), auto-restacking everything above it.
 
 use anyhow::{Result, bail};
@@ -22,12 +22,12 @@ pub fn run(gt: &mut Gt, _all: bool) -> Result<()> {
     if parent_id == *gt.repo.store().root_commit_id() {
         bail!(
             "working copy is based on jj's root commit, not a branch — \
-             run `gt sync` or `gt checkout <branch>` to recover"
+             run `jj-gt sync` or `jj-gt checkout <branch>` to recover"
         );
     }
     let trunk_id = gt.trunk_id()?;
     if parent_id == trunk_id {
-        bail!("@ sits directly on {} — use `gt create` to start a branch", gt.state.trunk);
+        bail!("@ sits directly on {} — use `jj-gt create` to start a branch", gt.state.trunk);
     }
     let parent = gt.repo.store().get_commit(&parent_id)?;
     let branch = gt
@@ -62,10 +62,10 @@ pub fn run(gt: &mut Gt, _all: bool) -> Result<()> {
         .as_ref()
         .map(|b| b.as_str().to_string())
         .unwrap_or_else(|| short(&jj_lib::object_id::ObjectId::hex(&parent_id)));
-    gt.finish_tx(tx, &format!("gt modify {label}"))?;
+    gt.finish_tx(tx, &format!("jj-gt modify {label}"))?;
     println!("Amended {label} (descendants restacked automatically)");
     if let Err(e) = crate::commands::log::print_stack(gt) {
-        eprintln!("gt: note: could not render the stack: {e:#}");
+        eprintln!("jj-gt: note: could not render the stack: {e:#}");
     }
     Ok(())
 }

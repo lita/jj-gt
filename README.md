@@ -1,19 +1,19 @@
-# gt — stacked PRs on jj-lib
+# jj-gt — stacked PRs on jj-lib
 
 Demo for the JJCon talk **"Three Writes, Not One: Building Developer Tools on jj-lib"**.
 
-`gt` reimplements Graphite's stacked-PR CLI on top of [jj-lib] 0.45.1 with a
-**colocated** git repo: `gt create` stacks bookmarked commits, `gt submit`
-pushes them and opens stacked GitHub PRs, `gt sync` fetches trunk and restacks
+`jj-gt` reimplements Graphite's stacked-PR CLI on top of [jj-lib] 0.45.1 with a
+**colocated** git repo: `jj-gt create` stacks bookmarked commits, `jj-gt submit`
+pushes them and opens stacked GitHub PRs, `jj-gt sync` fetches trunk and restacks
 — including detecting squash-merged branches by rebasing them to empty.
 
 The point of the demo: **committing a jj transaction only writes the op log.**
 Everything else the `jj` CLI quietly does around every command is the
-consumer's job, and `gt` reimplements it visibly. Run any command with
+consumer's job, and `jj-gt` reimplements it visibly. Run any command with
 `--explain` to watch the writes happen:
 
 ```text
-── the three writes — gt create lita/feat-api-...
+── writes — gt create lita/feat-api-...
    ▸ git refs         .git HEAD ⇒ detached at parent of @; index rebuilt
    ▸ git refs         .git/refs/heads/* now mirror jj bookmarks (export_refs)
    ▸ op log           tx.commit("gt create ...") → operation 10c40bc167a2
@@ -22,6 +22,9 @@ consumer's job, and `gt` reimplements it visibly. Run any command with
 ```
 
 ## The three writes (plus the one everyone knows)
+
+These are three categories of writes beyond the op-log commit, not a count of
+individual writes or lines in the `--explain` output.
 
 | write                  | what                                                    | API                                                     | when                                     |
 | ---------------------- | ------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------- |
@@ -63,11 +66,11 @@ every command (its own operation) — skip it and every command sees a stale `@`
   `GIT_ASKPASS` helper that answers with the GitHub token
 - `src/stack.rs` — the stack is a programmatic revset
   (`commit(root).descendants()`, streamed children-first), no parser needed
-- `src/commands/ops.rs` — `gt ops` shows how many operations one "command"
+- `src/commands/ops.rs` — `jj-gt ops` shows how many operations one "command"
   really is
-- `src/commands/undo.rs` — `gt undo` rolls back a whole command *including its
-  snapshot*. jj-lib has no undo API and `jj undo` peels one operation at a time,
-  so this is pure engine code: every gt transaction is stamped with a per-command
+- `src/commands/undo.rs` — `jj-gt undo` rolls back a whole command _including its
+  snapshot_. jj-lib has no undo API and `jj undo` peels one operation at a time,
+  so this is pure engine code: every jj-gt transaction is stamped with a per-command
   id (`Transaction::set_attribute`), and undo restores the view from just before
   that whole group. Undo/redo toggle, fully reversible via the op log — and undo
   is itself three writes (it runs the same `finish_tx` epilogue)
@@ -83,57 +86,58 @@ For a separate shared-branch commit-loss comparison with Graphite, see
 ```sh
 # setup (once): a scratch GitHub repo + auth
 gh repo create gt-demo-jjcon --private --add-readme --clone && cd gt-demo-jjcon
-alias gt=/path/to/jj-gt/target/debug/gt
+export PATH="/path/to/jj-gt/target/debug:$PATH"
 
-gt --explain init                 # 3 operations before you've done anything
-gt --explain checkout main
+jj-gt --explain init              # 3 operations before you've done anything
+jj-gt --explain checkout main
 $EDITOR src/api.py
-gt --explain create --all -m "feat(api): Add new API method for fetching users"
+jj-gt --explain create --all -m "feat(api): Add new API method for fetching users"
 $EDITOR src/api.py
-gt create --all -m "feat(api): Add pagination to user fetching"
-gt log                            # the colored stack
-gt --explain submit               # push with lease + stacked PRs (#2 based on #1)
+jj-gt create --all -m "feat(api): Add pagination to user fetching"
+jj-gt log                         # the colored stack
+jj-gt --explain submit            # push with lease + stacked PRs (#2 based on #1)
 
 # amend mid-stack: descendants restack automatically
-gt --explain checkout lita/feat-api-add-new-api-method-for-fetching-users
+jj-gt --explain checkout lita/feat-api-add-new-api-method-for-fetching-users
 $EDITOR src/api.py
-gt --explain modify --all         # "2 descendant(s) auto-restacked"
-gt log                            # upstack may show CONFLICT — it materialized, nothing blocked
-gt checkout lita/feat-api-add-pagination-to-user-fetching
+jj-gt --explain modify --all      # "2 descendant(s) auto-restacked"
+jj-gt log                         # upstack may show CONFLICT — it materialized, nothing blocked
+jj-gt checkout lita/feat-api-add-pagination-to-user-fetching
 cat src/api.py                    # jj's conflict markers, on disk
 $EDITOR src/api.py                # resolve
-gt modify --all                   # conflict gone, stack healthy
-gt submit                         # force-with-lease re-push
+jj-gt modify --all                # conflict gone, stack healthy
+jj-gt submit                      # force-with-lease re-push
 
 # the finale
 gh pr merge 1 --squash            # NOTE: --delete-branch silently fails in a
                                   # colocated repo (detached HEAD confuses gh's
                                   # local-branch cleanup) — delete it below instead
-gt --explain sync                 # squash-merge detected (rebased to EMPTY), local
+jj-gt --explain sync              # squash-merge detected (rebased to EMPTY), local
                                   # branch deleted, rest of stack onto new main
-gt submit                         # retarget the surviving PR to main (sync is
+jj-gt submit                      # retarget the surviving PR to main (sync is
                                   # local-only, like Graphite — submit talks to GitHub)
 git push origin --delete lita/feat-api-add-new-api-method-for-fetching-users
                                   # AFTER submit: deleting a PR's base branch before
                                   # retargeting makes GitHub CLOSE the child PR
-gt ops                            # every "command" was 1-3 operations
+jj-gt ops                         # every "command" was 1-3 operations
 
 # interop: it's all one repo
-jj log                            # the real jj CLI reads gt's writes perfectly
+jj log                            # the real jj CLI reads jj-gt's writes perfectly
 
-# undo a whole gt command — snapshot included — because the op log makes it easy
-gt create --all -m "feat: oops"
-gt --explain undo                 # branch AND the file vanish (one command, its
-                                  # own op group); run `gt undo` again to redo
+# undo a whole jj-gt command — snapshot included — because the op log makes it easy
+jj-gt create --all -m "feat: oops"
+jj-gt --explain undo              # branch AND the file vanish (one command, its
+                                  # own op group); run `jj-gt undo` again to redo
 ```
 
 ## Build
 
 ```sh
-cargo build          # jj-lib 0.45.1 from crates.io (see Cargo.toml)
+cargo build           # produces target/debug/jj-gt
+cargo install --path . # installs jj-gt without conflicting with Graphite's gt
 ```
 
-Auth: `gh auth login` (gt takes the token from `gh auth token`, or set
+Auth: `gh auth login` (jj-gt takes the token from `gh auth token`, or set
 `GITHUB_TOKEN`). Pushes authenticate via a temporary `GIT_ASKPASS` helper —
 no gitconfig changes.
 

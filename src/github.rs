@@ -1,4 +1,4 @@
-//! Minimal GitHub REST client for the stacked-PR half of `gt submit`/`gt sync`.
+//! Minimal GitHub REST client for the stacked-PR half of `jj-gt submit`/`jj-gt sync`.
 //! jj-lib is not involved here — pushing the branches is jj-lib's job, turning
 //! them into a PR stack is plain HTTPS.
 
@@ -93,7 +93,7 @@ impl GitHub {
             .set("Authorization", &format!("Bearer {}", self.token))
             .set("Accept", "application/vnd.github+json")
             .set("X-GitHub-Api-Version", "2022-11-28")
-            .set("User-Agent", "gt-jjcon-demo");
+            .set("User-Agent", "jj-gt-jjcon-demo");
         let resp = match body {
             Some(json) => req.send_json(json),
             None => req.call(),

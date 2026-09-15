@@ -1,4 +1,4 @@
-//! gt checkout <bookmark>: put a fresh (empty) working-copy commit on top of
+//! jj-gt checkout <bookmark>: put a fresh (empty) working-copy commit on top of
 //! the target — jj's model of "being on a branch".
 
 use anyhow::Result;
@@ -16,7 +16,7 @@ pub fn run(gt: &mut Gt, name: &str) -> Result<()> {
     // View-side checkout only: creates the new empty wc commit and points the
     // view's wc pointer at it. Files on disk don't move until finish_tx.
     tx.repo_mut().check_out(ws_name, &target).block_on()?;
-    gt.finish_tx(tx, &format!("gt checkout {name}"))?;
+    gt.finish_tx(tx, &format!("jj-gt checkout {name}"))?;
     println!("Checked out {name}");
     Ok(())
 }

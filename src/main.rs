@@ -1,4 +1,4 @@
-//! gt — a Graphite-style stacked-PR CLI built on jj-lib.
+//! jj-gt — a Graphite-style stacked-PR CLI built on jj-lib.
 //! Demo for the JJCon talk "Three Writes, Not One".
 
 mod auth;
@@ -20,9 +20,9 @@ use clap::{Parser, Subcommand};
 use crate::explain::Explain;
 
 #[derive(Parser)]
-#[command(name = "gt", about = "stacked PRs on jj-lib (JJCon demo)")]
+#[command(name = "jj-gt", about = "stacked PRs on jj-lib (JJCon demo)")]
 struct Cli {
-    /// Narrate the three writes as they happen.
+    /// Narrate the writes as they happen.
     #[arg(long, global = true)]
     explain: bool,
     #[command(subcommand)]
@@ -57,13 +57,13 @@ enum Command {
     Log,
     /// Show the operation log tail.
     Ops,
-    /// Roll back the last gt command — snapshot included.
+    /// Roll back the last jj-gt command — snapshot included.
     Undo,
 }
 
 fn main() {
     if let Err(err) = run() {
-        eprintln!("gt: error: {err:#}");
+        eprintln!("jj-gt: error: {err:#}");
         std::process::exit(1);
     }
 }

@@ -1,11 +1,11 @@
-//! gt undo: roll back the last gt command — snapshot included.
+//! jj-gt undo: roll back the last jj-gt command — snapshot included.
 //!
 //! jj-lib has no undo API; `jj undo` is CLI code that restores the previous
-//! operation's view (one op at a time). gt can group a whole command because it
+//! operation's view (one op at a time). jj-gt can group a whole command because it
 //! stamped every operation with a per-command id (CMD_ID_ATTR): undo finds the
 //! newest command group and restores the view from just before it.
 //!
-//! Because an undo is itself a command group, running `gt undo` again restores
+//! Because an undo is itself a command group, running `jj-gt undo` again restores
 //! to *its* parent — i.e. undo and redo toggle. Simple, fully reversible, and a
 //! nice demo of why the op log makes this tractable. (The real jj CLI walks
 //! strictly backward on repeat and has a separate `redo`; we favor the toggle.)
@@ -24,9 +24,9 @@ use pollster::FutureExt as _;
 use crate::engine::{CMD_ID_ATTR, Gt};
 use crate::util::short;
 
-/// Encoded in the op description so a human reading `jj op log` / `gt ops` can
+/// Encoded in the op description so a human reading `jj op log` / `jj-gt ops` can
 /// see what an undo restored to. Not parsed for logic.
-const UNDO_DESC_PREFIX: &str = "gt undo: restore to operation ";
+const UNDO_DESC_PREFIX: &str = "jj-gt undo: restore to operation ";
 
 fn single_parent(op: &Operation) -> Result<Operation> {
     let mut parents = op.parents().block_on()?;
@@ -54,8 +54,8 @@ pub fn run(gt: &mut Gt) -> Result<()> {
     }
 
     // Walk back over the whole command group (ops sharing one cmd id). Ops with
-    // no cmd id (raw jj, or gt init) are undone one at a time. The target is the
-    // operation just before the group — for a gt-undo group, that's the state
+    // no cmd id (raw jj, or jj-gt init) are undone one at a time. The target is the
+    // operation just before the group — for a jj-gt-undo group, that's the state
     // the previous undo rewound from, which is why undo/redo toggles.
     let group_id = cmd_id_of(&op);
     let mut undone: Vec<String> = Vec::new();
@@ -72,12 +72,12 @@ pub fn run(gt: &mut Gt) -> Result<()> {
         if desc.contains("push") {
             eprintln!(
                 "{} undoing a push only rewinds jj's record of the remote — \
-                 GitHub still has the pushed refs; run `gt sync` before the next submit",
+                 GitHub still has the pushed refs; run `jj-gt sync` before the next submit",
                 "!".yellow().bold()
             );
         }
     }
-    ex.section("gt undo: restore the view from before the last command");
+    ex.section("jj-gt undo: restore the view from before the last command");
     for desc in &undone {
         ex.note(&format!("undoing operation: {desc}"));
     }
@@ -107,7 +107,7 @@ pub fn run(gt: &mut Gt) -> Result<()> {
         target.metadata().description
     );
     if let Err(e) = crate::commands::log::print_stack(gt) {
-        eprintln!("gt: note: could not render the stack: {e:#}");
+        eprintln!("jj-gt: note: could not render the stack: {e:#}");
     }
     Ok(())
 }

@@ -1,4 +1,4 @@
-//! gt init: colocate jj onto the repo.
+//! jj-gt init: colocate jj onto the repo.
 //!
 //! On an existing git clone this is Workspace::init_external_git — which, and
 //! this is the first talk beat, does NOT import any git refs: the jj view
@@ -31,10 +31,10 @@ pub fn run(cwd: &Path, explain: Explain) -> Result<()> {
     let ex = explain;
 
     if !root.join(".git").exists() {
-        ex.section("gt init: no .git yet — creating one");
+        ex.section("jj-gt init: no .git yet — creating one");
         git_output(&root, &["init", "-b", "main"])?;
     }
-    ex.section("gt init: colocating jj onto the git repo");
+    ex.section("jj-gt init: colocating jj onto the git repo");
     ex.note("Workspace::init_external_git — creates .jj, does NOT import refs");
     let (mut workspace, repo) = Workspace::init_external_git(&settings, &root, &root.join(".git"))
         .block_on()
@@ -68,8 +68,8 @@ pub fn run(cwd: &Path, explain: Explain) -> Result<()> {
     ));
     let repo = if tx.repo().has_changes() {
         git::export_refs(tx.repo_mut())?;
-        let repo = tx.commit("gt init: import git refs").block_on()?;
-        ex.op_log("gt init: import git refs", &repo.op_id().hex());
+        let repo = tx.commit("jj-gt init: import git refs").block_on()?;
+        ex.op_log("jj-gt init: import git refs", &repo.op_id().hex());
         repo
     } else {
         repo
@@ -90,8 +90,8 @@ pub fn run(cwd: &Path, explain: Explain) -> Result<()> {
         tx.repo_mut().rebase_descendants().block_on()?;
         git::reset_head(tx.repo_mut(), &ws_name, &root, &wc_commit).block_on()?;
         ex.git_refs(&format!(".git HEAD ⇒ detached at {} (parent of @)", short(&head_id.hex())));
-        let repo = tx.commit("gt init: import git head").block_on()?;
-        ex.op_log("gt init: import git head", &repo.op_id().hex());
+        let repo = tx.commit("jj-gt init: import git head").block_on()?;
+        ex.op_log("jj-gt init: import git head", &repo.op_id().hex());
         let mut locked_ws = workspace.start_working_copy_mutation().block_on()?;
         locked_ws.locked_wc().reset(&wc_commit).block_on()?;
         ex.note("working copy reset (state only — git already wrote the files)");
@@ -140,8 +140,8 @@ pub fn run(cwd: &Path, explain: Explain) -> Result<()> {
         tx.repo_mut().rebase_descendants().block_on()?;
         git::reset_head(tx.repo_mut(), &ws_name, &root, &new_wc).block_on()?;
         git::export_refs(tx.repo_mut())?;
-        let repo = tx.commit("gt init: create trunk").block_on()?;
-        ex.op_log("gt init: create trunk", &repo.op_id().hex());
+        let repo = tx.commit("jj-gt init: create trunk").block_on()?;
+        ex.op_log("jj-gt init: create trunk", &repo.op_id().hex());
         workspace
             .check_out(repo.op_id().clone(), None, &new_wc)
             .block_on()?;

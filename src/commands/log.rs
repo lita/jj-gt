@@ -1,4 +1,4 @@
-//! gt log: the colored stack view.
+//! jj-gt log: the colored stack view.
 
 use anyhow::Result;
 use owo_colors::OwoColorize;

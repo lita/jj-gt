@@ -1,4 +1,4 @@
-//! gt submit: push every stack branch (force-with-lease) and create/update the
+//! jj-gt submit: push every stack branch (force-with-lease) and create/update the
 //! stacked PRs on GitHub.
 //!
 //! The push itself is a jj-lib operation: push_refs mutates the view's
@@ -28,7 +28,7 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
     let entries = current_stack(gt)?;
     let branches = branch_entries(&entries)?;
     if branches.is_empty() {
-        bail!("nothing to submit — the stack is empty (use `gt create` first)");
+        bail!("nothing to submit — the stack is empty (use `jj-gt create` first)");
     }
     // jj git push refuses these too: conflicted trees would push materialized
     // .jjconflict-* directories to GitHub.
@@ -102,14 +102,14 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
             );
         }
         if !stats.all_ok() {
-            bail!("push failed — the jj view was left untouched; re-run after `gt sync`");
+            bail!("push failed — the jj view was left untouched; re-run after `jj-gt sync`");
         }
         for name in &stats.pushed {
             println!("{} pushed {}", "✓".green(), name.as_str());
         }
         // push_refs already updated the view's remote-tracking bookmarks —
         // committing the transaction is what makes that an operation.
-        gt.finish_tx(tx, "gt submit: push stack")?;
+        gt.finish_tx(tx, "jj-gt submit: push stack")?;
     } else {
         println!("All branches already up to date on {}", remote.as_str());
     }
@@ -170,7 +170,7 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
             body.push_str(&format!("- #{other_number}{marker}\n"));
         }
         body.push_str(&format!("- `{}` (trunk)\n", gt.state.trunk));
-        body.push_str("\n*stacked with [gt](https://github.com/jj-vcs/jj) on jj-lib*\n");
+        body.push_str("\n*stacked with [jj-gt](https://github.com/jj-vcs/jj) on jj-lib*\n");
         gh.update_pr(*number, None, Some(&body))?;
     }
 

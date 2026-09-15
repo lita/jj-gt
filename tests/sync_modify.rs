@@ -122,7 +122,7 @@ fn stale_submit_after_sync_and_modify_keeps_force_with_lease_safety() {
 }
 
 fn gt(dir: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_gt"))
+    Command::new(env!("CARGO_BIN_EXE_jj-gt"))
         .args(args)
         .current_dir(dir)
         .env("GITHUB_TOKEN", "dummy")

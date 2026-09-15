@@ -132,11 +132,11 @@
 </header>
 
 <h2><span class="sec">01</span> · Anatomy of one command</h2>
-<p>Every mutating <code>gt</code> command ends with the same choreography. The order is load-bearing — and it is not the order the writes are numbered in:</p>
+<p>Every mutating <code>jj-gt</code> command ends with the same choreography. The order is load-bearing — and it is not the order the writes are numbered in:</p>
 
 <figure>
 <div class="scroll">
-<svg viewBox="0 0 960 430" role="img" aria-label="Timeline of one gt command: git refs are written inside the transaction before commit; the op log write is the commit; working-copy files and workspace state are written after commit with the new operation id.">
+<svg viewBox="0 0 960 430" role="img" aria-label="Timeline of one jj-gt command: git refs are written inside the transaction before commit; the op log write is the commit; working-copy files and workspace state are written after commit with the new operation id.">
   <!-- time arrow -->
   <line x1="185" y1="26" x2="925" y2="26" stroke="var(--muted)" stroke-width="1"/>
   <polygon points="925,26 915,22 915,30" fill="var(--muted)"/>
@@ -214,7 +214,7 @@
   <text x="726" y="243" font-size="10.5" fill="var(--muted)" font-family="ui-monospace,Menlo,monospace">repo.op_id() flows forward</text>
 </svg>
 </div>
-<figcaption>One <code>gt create</code>, four stores. The writes are numbered ①②③ by the talk’s framing — but they execute ③, commit, ①, ② : git refs must be recorded <em>inside</em> the same operation, while the working copy needs the operation id that only exists <em>after</em> commit. (<code>Workspace::check_out</code> bundles ① and ② in one call.)</figcaption>
+<figcaption>One <code>jj-gt create</code>, four stores. The writes are numbered ①②③ by the talk’s framing — but they execute ③, commit, ①, ② : git refs must be recorded <em>inside</em> the same operation, while the working copy needs the operation id that only exists <em>after</em> commit. (<code>Workspace::check_out</code> bundles ① and ② in one call.)</figcaption>
 </figure>
 
 <div class="writes">
@@ -240,35 +240,35 @@
   </div>
 </div>
 
-<h2><span class="sec">02</span> · What each gt command writes</h2>
+<h2><span class="sec">02</span> · What each jj-gt command writes</h2>
 <div class="matrix-wrap">
 <table class="matrix">
   <thead><tr>
     <th>command</th><th>operations</th><th>git refs</th><th>files</th><th>wc state</th><th>network</th>
   </tr></thead>
   <tbody>
-    <tr><td class="cmd">gt init</td><td class="ops">3 — workspace · import refs · import head</td>
+    <tr><td class="cmd">jj-gt init</td><td class="ops">3 — workspace · import refs · import head</td>
       <td><span class="dot d-git"></span>HEAD reset</td>
       <td class="no">reset (state only)</td>
       <td><span class="dot d-state"></span>adopt HEAD</td><td class="no">—</td></tr>
-    <tr><td class="cmd">gt checkout</td><td class="ops">1–2 — snapshot? · checkout</td>
+    <tr><td class="cmd">jj-gt checkout</td><td class="ops">1–2 — snapshot? · checkout</td>
       <td><span class="dot d-git"></span>HEAD follows @</td>
       <td><span class="dot d-files"></span>tree swap</td>
       <td><span class="dot d-state"></span></td><td class="no">—</td></tr>
-    <tr><td class="cmd">gt create</td><td class="ops">1–2 — snapshot? · create</td>
+    <tr><td class="cmd">jj-gt create</td><td class="ops">1–2 — snapshot? · create</td>
       <td><span class="dot d-git"></span>new refs/heads/*</td>
       <td class="no">no-op (same tree)</td>
       <td><span class="dot d-state"></span></td><td class="no">—</td></tr>
-    <tr><td class="cmd">gt modify</td><td class="ops">2 — snapshot · amend</td>
+    <tr><td class="cmd">jj-gt modify</td><td class="ops">2 — snapshot · amend</td>
       <td><span class="dot d-git"></span>branch ref moves</td>
       <td><span class="dot d-files"></span>if conflicts materialize</td>
       <td><span class="dot d-state"></span></td><td class="no">—</td></tr>
-    <tr><td class="cmd">gt submit</td><td class="ops">1–2 — snapshot? · push</td>
+    <tr><td class="cmd">jj-gt submit</td><td class="ops">1–2 — snapshot? · push</td>
       <td><span class="dot d-git"></span>refs/remotes/* move</td>
       <td class="no">—</td>
       <td><span class="dot d-state"></span></td>
       <td><span class="dot d-net"></span>push + PR API</td></tr>
-    <tr><td class="cmd">gt sync</td><td class="ops">1–2 — snapshot? · fetch+restack</td>
+    <tr><td class="cmd">jj-gt sync</td><td class="ops">1–2 — snapshot? · fetch+restack</td>
       <td><span class="dot d-git"></span>branches rewritten</td>
       <td><span class="dot d-files"></span>restacked @</td>
       <td><span class="dot d-state"></span></td>
@@ -304,6 +304,6 @@ tx.repo_mut().rebase_descendants().block_on()?;        <span class="c-cmt">// or
 <span class="c-state">    Some(&amp;old_tree), &amp;new_wc).block_on()?;             // …and write ② — state</span></code></pre>
 
 <footer>
-  gt — a Graphite-style stacked-PR CLI on jj-lib 0.45.1 · run any command with <code>--explain</code> to watch these writes live · JJCon
+  jj-gt — a Graphite-style stacked-PR CLI on jj-lib 0.45.1 · run any command with <code>--explain</code> to watch these writes live · JJCon
 </footer>
 </main>

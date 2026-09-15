@@ -10,7 +10,7 @@ for required in cargo git gt jj; do
   fi
 done
 GRAPHITE_GT=$(type -P gt)
-JJ_GT="$REPO/target/debug/gt"
+JJ_GT="$REPO/target/debug/jj-gt"
 export GIT_PAGER=cat PAGER=cat GIT_TERMINAL_PROMPT=0 LC_ALL=C
 
 DEMO=$(mktemp -d "${TMPDIR:-/tmp}/gt-vs-jj-gt.XXXXXX")
