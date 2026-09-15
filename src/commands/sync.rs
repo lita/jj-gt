@@ -41,7 +41,12 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
         // Commits whose remote branch disappeared (deleted after merge) get
         // abandoned during import.
         abandon_unreachable_commits: true,
-        record_synthetic_predecessors: false,
+        // A force-pushed jj rewrite (for example, a collaborator's `gt
+        // modify`) has the same change id as the commit it replaces. Preserve
+        // that predecessor relationship so rebase_descendants() moves our
+        // scratch working-copy commit onto the replacement instead of
+        // abandoning it onto the old commit's parent (or the root commit).
+        record_synthetic_predecessors: true,
         remote_auto_track_bookmarks: auto_track,
     };
     {
