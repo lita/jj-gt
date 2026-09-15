@@ -13,13 +13,20 @@ consumer's job, and `jj-gt` reimplements it visibly. Run any command with
 `--explain` to watch the writes happen:
 
 ```text
-── writes — gt create lita/feat-api-...
-   ▸ git refs         .git HEAD ⇒ detached at parent of @; index rebuilt
+── writes — jj-gt create lita/feat-api
+   ▸ git refs         .git/HEAD ← detached at 3ff7c5e2 (was ae9ba8c3); .git/index ← tree of parent(@) (reset_head)
    ▸ git refs         .git/refs/heads/* now mirror jj bookmarks (export_refs)
-   ▸ op log           tx.commit("gt create ...") → operation 10c40bc167a2
+   ▸ op log           tx.commit("jj-gt create lita/feat-api") → operation 9d7e90a66a99
    ▸ working copy     check_out: 0 added, 0 updated, 0 removed on disk
-   ▸ workspace state  .jj/working_copy ← operation 10c40bc167a2
+   ▸ workspace state  .jj/working_copy ← operation 9d7e90a66a99
 ```
+
+Every `▸ git refs` line is a write *into* `.git` (`reset_head`, `export_refs`,
+`update_intent_to_add`). The reverse direction, `.git → jj` (`import_refs`,
+`import_head`), only changes the jj view and shows up as a dimmed `·` note.
+Note that `reset_head` rewrites `.git/HEAD` only when `parent(@)` actually
+moved — right after `jj-gt init` it is still attached to `main`, and only the
+index is rebuilt; the line says which case you got.
 
 ## The three writes (plus the one everyone knows)
 

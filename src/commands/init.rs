@@ -82,19 +82,32 @@ pub fn run(cwd: &Path, explain: Explain) -> Result<()> {
     git::import_head(tx.repo_mut(), &ws_name, &root).block_on()?;
     let head_target = tx.repo().view().git_head(&ws_name).as_normal().cloned();
     let repo = if let Some(head_id) = head_target {
+        ex.note(&format!(
+            "import_head: .git/HEAD ({}) → jj view (git_head); nothing written to .git",
+            short(&head_id.hex())
+        ));
         let head_commit = tx.repo().store().get_commit(&head_id)?;
         let wc_commit = tx
             .repo_mut()
             .check_out(ws_name.clone(), &head_commit)
             .block_on()?;
         tx.repo_mut().rebase_descendants().block_on()?;
+        // The view's git_head is what import_head just recorded, so reset_head
+        // sees parent(@) == HEAD and leaves .git/HEAD alone (still attached to
+        // whatever branch git had). Only the index gets rebuilt.
+        let old_git_head = tx.repo().view().git_head(&ws_name).clone();
+        let root_id = tx.repo().store().root_commit_id().clone();
         git::reset_head(tx.repo_mut(), &ws_name, &root, &wc_commit).block_on()?;
-        ex.git_refs(&format!(".git HEAD ⇒ detached at {} (parent of @)", short(&head_id.hex())));
+        ex.reset_head(&old_git_head, &wc_commit.parent_ids()[0], &root_id);
         let repo = tx.commit("jj-gt init: import git head").block_on()?;
         ex.op_log("jj-gt init: import git head", &repo.op_id().hex());
         let mut locked_ws = workspace.start_working_copy_mutation().block_on()?;
         locked_ws.locked_wc().reset(&wc_commit).block_on()?;
-        ex.note("working copy reset (state only — git already wrote the files)");
+        ex.note(
+            "no `working copy` write: git already put HEAD's tree on disk, so \
+             LockedWorkingCopy::reset only re-points .jj/working_copy at @'s tree \
+             (files get re-stat'ed on the next snapshot)",
+        );
         locked_ws.finish(repo.op_id().clone()).block_on()?;
         ex.workspace_state(&repo.op_id().hex());
         repo
@@ -128,7 +141,7 @@ pub fn run(cwd: &Path, explain: Explain) -> Result<()> {
         let root_commit = tx.repo().store().get_commit(&root_id)?;
         let initial = tx
             .repo_mut()
-            .new_commit(vec![root_id], root_commit.tree())
+            .new_commit(vec![root_id.clone()], root_commit.tree())
             .set_description("initial commit")
             .write()
             .block_on()?;
@@ -138,13 +151,18 @@ pub fn run(cwd: &Path, explain: Explain) -> Result<()> {
         );
         let new_wc = tx.repo_mut().check_out(ws_name.clone(), &initial).block_on()?;
         tx.repo_mut().rebase_descendants().block_on()?;
+        let old_git_head = tx.repo().view().git_head(&ws_name).clone();
         git::reset_head(tx.repo_mut(), &ws_name, &root, &new_wc).block_on()?;
+        ex.reset_head(&old_git_head, &new_wc.parent_ids()[0], &root_id);
         git::export_refs(tx.repo_mut())?;
+        ex.git_refs(&format!(".git/refs/heads/{trunk} ← initial commit (export_refs)"));
         let repo = tx.commit("jj-gt init: create trunk").block_on()?;
         ex.op_log("jj-gt init: create trunk", &repo.op_id().hex());
-        workspace
+        let stats = workspace
             .check_out(repo.op_id().clone(), None, &new_wc)
             .block_on()?;
+        ex.working_copy(stats.added_files, stats.updated_files, stats.removed_files);
+        ex.workspace_state(&repo.op_id().hex());
         repo
     } else {
         repo

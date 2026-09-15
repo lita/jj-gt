@@ -319,8 +319,10 @@ impl Gt {
             // Keep `git status` in the colocated repo honest about wc changes.
             git::update_intent_to_add(tx.repo(), &self.root, &wc_commit.tree(), &new_wc.tree())
                 .block_on()?;
+            ex.git_refs(".git/index ← intent-to-add entries for files new in @ (update_intent_to_add)");
             let export_stats = git::export_refs(tx.repo_mut())?;
             report_export(&export_stats);
+            ex.git_refs(".git/refs/heads/* now mirror jj bookmarks (export_refs)");
             self.repo = tx.commit("jj-gt: snapshot working copy").block_on()?;
             ex.op_log("jj-gt: snapshot working copy", &self.repo.op_id().hex());
         } else {
@@ -364,15 +366,13 @@ impl Gt {
 
         // ── write 3: colocated git (HEAD + index + refs), INSIDE the tx ──
         if let Some(new_wc) = &new_wc_commit {
+            // reset_head only rewrites .git/HEAD when the view's record of it
+            // differs from parent(@); capture the record first so --explain
+            // can say which case this was.
+            let old_git_head = tx.repo().view().git_head(&name).clone();
+            let root_id = tx.repo().store().root_commit_id().clone();
             match git::reset_head(tx.repo_mut(), &name, &self.root, new_wc).block_on() {
-                Ok(()) => {
-                    let parent = new_wc
-                        .parent_ids()
-                        .first()
-                        .map(|id| short(&id.hex()))
-                        .unwrap_or_default();
-                    ex.git_refs(&format!(".git HEAD ⇒ detached at parent of @ ({parent}); index rebuilt"));
-                }
+                Ok(()) => ex.reset_head(&old_git_head, &new_wc.parent_ids()[0], &root_id),
                 Err(git::GitResetHeadError::UpdateHeadRef(e)) => {
                     eprintln!("jj-gt: warning: git HEAD moved concurrently, not resetting it: {e}");
                 }

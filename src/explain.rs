@@ -7,8 +7,18 @@
 //!   working copy    — files on disk (write 1)
 //!   workspace state — .jj/working_copy: which op + tree the workspace is at (write 2)
 //!   git refs        — the colocated .git: refs/heads/*, HEAD, the index (write 3)
+//!
+//! Direction convention: a `▸ git refs` line is always jj → .git (reset_head,
+//! export_refs, update_intent_to_add). The reverse direction, .git → jj
+//! (import_refs, import_head), only updates the jj view and is narrated as a
+//! dimmed `·` note, never as a write.
 
+use jj_lib::backend::CommitId;
+use jj_lib::object_id::ObjectId as _;
+use jj_lib::op_store::RefTarget;
 use owo_colors::OwoColorize;
+
+use crate::util::short;
 
 #[derive(Clone, Copy)]
 pub struct Explain {
@@ -83,6 +93,40 @@ impl Explain {
                 what
             );
         }
+    }
+
+    /// Write 3, the HEAD + index half: narrate what `git::reset_head` just
+    /// did. `old_head` is the view's git_head captured BEFORE the call;
+    /// `parent` is @'s first parent. reset_head rewrites .git/HEAD only when
+    /// those differ (a parent of root means "unborn" HEAD); the index is
+    /// rebuilt from parent(@)'s tree either way.
+    pub fn reset_head(&self, old_head: &RefTarget, parent: &CommitId, root_id: &CommitId) {
+        if !self.on {
+            return;
+        }
+        let new_head = (parent != root_id).then(|| parent.clone());
+        let head_moved = *old_head != RefTarget::resolved(new_head.clone());
+        let was = old_head
+            .as_normal()
+            .map(|id| short(&id.hex()))
+            .unwrap_or_else(|| "unborn".to_string());
+        let what = match (head_moved, new_head) {
+            (true, Some(id)) => format!(
+                ".git/HEAD ← detached at {} (was {was}); .git/index ← tree of parent(@) (reset_head)",
+                short(&id.hex())
+            ),
+            (true, None) => format!(
+                ".git/HEAD ← unborn, parent(@) is root (was {was}); .git/index ← empty (reset_head)"
+            ),
+            (false, Some(id)) => format!(
+                ".git/index ← tree of parent(@) {}; HEAD unchanged, already there (reset_head)",
+                short(&id.hex())
+            ),
+            (false, None) => {
+                ".git/index ← empty; HEAD unchanged, still unborn (reset_head)".to_string()
+            }
+        };
+        self.git_refs(&what);
     }
 
     /// Network I/O (git subprocess, GitHub API) — not one of the three writes,
