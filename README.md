@@ -67,6 +67,26 @@ individual writes or lines in the `--explain` output.
 And **write zero**: snapshotting the working copy into `@` at the start of
 every command (its own operation) — skip it and every command sees a stale `@`.
 
+## Switching branches and recovering saved work
+
+`jj-gt checkout` accepts bookmark names, full commit IDs, and unambiguous
+commit ID prefixes. `jj-gt log` shows the current stack, other available
+bookmarks, and saved unbookmarked work with IDs you can check out.
+
+Switching away with edits snapshots them first and prints a recovery command:
+
+```sh
+jj-gt checkout main       # prints: Saved unbookmarked work at <id>; ...
+jj-gt log                 # find the snapshot under Saved work
+jj-gt checkout <id>       # resume that snapshot, with its edits intact
+jj-gt create -m "My work"  # turn the recovered edits into a bookmarked branch
+```
+
+Checkout resumes a nonempty, unbookmarked tip directly. For bookmarked or
+historical commits, it opens a fresh working-copy commit on top, as before.
+Bookmark names take precedence over commit ID prefixes; ambiguous prefixes
+require a longer ID.
+
 ## Where each concept lives
 
 - `src/engine.rs` — the whole story:

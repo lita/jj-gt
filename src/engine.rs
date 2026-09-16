@@ -13,6 +13,7 @@
 //! BEFORE tx.commit (so the exported state is recorded in the same operation);
 //! the working copy is updated AFTER tx.commit (finish() needs the new op id).
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -22,7 +23,7 @@ use jj_lib::commit::Commit;
 use jj_lib::git;
 use jj_lib::gitignore::GitIgnoreFile;
 use jj_lib::matchers::{EverythingMatcher, NothingMatcher};
-use jj_lib::object_id::ObjectId;
+use jj_lib::object_id::{HexPrefix, ObjectId, PrefixResolution};
 use jj_lib::op_store::RefTarget;
 use jj_lib::ref_name::{RefName, RemoteName, WorkspaceNameBuf};
 use jj_lib::repo::{MutableRepo, ReadonlyRepo, Repo as _};
@@ -443,28 +444,79 @@ impl Gt {
         Ok(true)
     }
 
-    /// Resolve a bookmark: local first, then remote (origin, then the "git"
-    /// pseudo-remote colocated git branches live on).
-    pub fn resolve_bookmark(&self, name: &str) -> Result<CommitId> {
-        let ref_name = RefName::new(name);
-        let target = self.repo.view().get_local_bookmark(ref_name);
-        if target.has_conflict() {
-            bail!("bookmark {name:?} is conflicted — resolve it with jj first");
-        }
-        if let Some(id) = target.as_normal() {
-            return Ok(id.clone());
-        }
+    /// Names accepted by checkout, with local bookmarks taking precedence over
+    /// the configured remote and then the colocated Git repo.
+    pub fn checkout_bookmarks(&self) -> BTreeMap<String, RefTarget> {
+        let mut bookmarks: BTreeMap<_, _> = self
+            .repo
+            .view()
+            .local_bookmarks()
+            .map(|(name, target)| (name.as_str().to_owned(), target.clone()))
+            .collect();
         for remote in [self.state.remote.as_str(), "git"] {
-            let symbol = ref_name.to_remote_symbol(RemoteName::new(remote));
-            let remote_ref = self.repo.view().get_remote_bookmark(symbol);
-            if let Some(id) = remote_ref.target.as_normal() {
-                return Ok(id.clone());
+            for (name, remote_ref) in self.repo.view().remote_bookmarks(RemoteName::new(remote)) {
+                if remote_ref.target.is_present() {
+                    bookmarks
+                        .entry(name.as_str().to_owned())
+                        .or_insert_with(|| remote_ref.target.clone());
+                }
             }
         }
-        bail!(
-            "no bookmark named {name:?} (locally or on {})",
-            self.state.remote
-        )
+        bookmarks
+    }
+
+    /// Prefer a bookmark name, including a hex-looking one, to a commit ID.
+    pub fn resolve_checkout_target(&self, name: &str) -> Result<CommitId> {
+        if let Some(target) = self.checkout_bookmarks().get(name) {
+            return target.as_normal().cloned().ok_or_else(|| {
+                anyhow!("bookmark {name:?} is conflicted — resolve it with jj first")
+            });
+        }
+        if let Some(prefix) = HexPrefix::try_from_hex(name) {
+            match self
+                .repo
+                .index()
+                .resolve_commit_id_prefix(&prefix)
+                .block_on()?
+            {
+                PrefixResolution::SingleMatch(id) => return Ok(id),
+                PrefixResolution::AmbiguousMatch => {
+                    bail!("commit ID prefix {name:?} is ambiguous — use a longer commit ID")
+                }
+                PrefixResolution::NoMatch => {}
+            }
+        }
+        bail!("no bookmark or commit matching {name:?} — use `jj-gt log` to see checkout targets")
+    }
+
+    /// IDs printed as checkout targets must be unambiguous in jj's index.
+    pub fn short_commit_id(&self, id: &CommitId) -> Result<String> {
+        let len = self
+            .repo
+            .index()
+            .shortest_unique_commit_id_prefix_len(id)
+            .block_on()?;
+        let hex = id.hex();
+        Ok(hex[..len.max(8).min(hex.len())].to_owned())
+    }
+
+    /// A nonempty, unbookmarked tip is work we can resume directly. Named or
+    /// published commits keep checkout's usual fresh-working-copy behavior.
+    pub fn is_saved_work(&self, commit: &Commit) -> Result<bool> {
+        let view = self.repo.view();
+        let id = commit.id();
+        if !view.heads().contains(id)
+            || view.local_bookmarks_for_commit(id).next().is_some()
+            || view
+                .all_remote_bookmarks()
+                .any(|(_, r)| r.target.added_ids().any(|i| i == id))
+            || view
+                .local_tags()
+                .any(|(_, target)| target.added_ids().any(|i| i == id))
+        {
+            return Ok(false);
+        }
+        Ok(!commit.is_empty(self.repo.as_ref()).block_on()?)
     }
 
     /// Delete a local bookmark in the current transaction (RefTarget::absent

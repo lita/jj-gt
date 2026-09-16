@@ -33,8 +33,11 @@ struct Cli {
 enum Command {
     /// Colocate jj onto this git repo and pick a trunk.
     Init,
-    /// Check out a bookmark (fresh working-copy commit on top).
-    Checkout { name: String },
+    /// Check out a bookmark or commit ID; resume unbookmarked saved work.
+    Checkout {
+        #[arg(value_name = "BOOKMARK_OR_COMMIT")]
+        name: String,
+    },
     /// Turn the working copy into a new stack branch.
     Create {
         /// Include all changes (accepted for Graphite parity; jj snapshots everything).
@@ -52,7 +55,7 @@ enum Command {
     Submit,
     /// Fetch trunk, drop merged branches, restack.
     Sync,
-    /// Show the current stack.
+    /// Show the current stack, other bookmarks, and unbookmarked saved work.
     #[command(alias = "ls")]
     Log,
     /// Show the operation log tail.
