@@ -87,6 +87,18 @@ historical commits, it opens a fresh working-copy commit on top, as before.
 Bookmark names take precedence over commit ID prefixes; ambiguous prefixes
 require a longer ID.
 
+## Amending the parent branch
+
+After editing files on a branch, run `jj-gt modify` to fold the working-copy
+changes into its parent branch commit and start a fresh empty working-copy
+commit on top. The branch keeps its name and commit message, and any commits
+stacked above it are automatically restacked.
+
+All changes are included without staging; `--all` is accepted for Graphite
+compatibility but is optional. An empty working copy has nothing to amend.
+If the working copy sits directly on trunk, use `jj-gt create -m "My work"`
+to start a branch first.
+
 ## Where each concept lives
 
 - `src/engine.rs` — the whole story:
