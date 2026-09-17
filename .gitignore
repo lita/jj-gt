@@ -17,3 +17,6 @@ debug/
 
 # Claude Code local permissions (machine-specific)
 .claude/settings.local.json
+
+# Personal scratch notes (local only)
+personal-notes.md

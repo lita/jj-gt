@@ -13,6 +13,7 @@
 //! BEFORE tx.commit (so the exported state is recorded in the same operation);
 //! the working copy is updated AFTER tx.commit (finish() needs the new op id).
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -22,10 +23,10 @@ use jj_lib::commit::Commit;
 use jj_lib::git;
 use jj_lib::gitignore::GitIgnoreFile;
 use jj_lib::matchers::{EverythingMatcher, NothingMatcher};
-use jj_lib::object_id::ObjectId;
+use jj_lib::object_id::{HexPrefix, ObjectId, PrefixResolution};
 use jj_lib::op_store::RefTarget;
 use jj_lib::ref_name::{RefName, RemoteName, WorkspaceNameBuf};
-use jj_lib::repo::{ReadonlyRepo, Repo as _};
+use jj_lib::repo::{MutableRepo, ReadonlyRepo, Repo as _};
 use jj_lib::settings::UserSettings;
 use jj_lib::transaction::Transaction;
 use jj_lib::working_copy::{SnapshotOptions, WorkingCopyFreshness};
@@ -49,6 +50,10 @@ pub struct Gt {
     pub root: PathBuf,
     /// Unique id for this jj-gt invocation; stamped on every operation it commits.
     pub cmd_id: String,
+    /// True while `snapshot()` runs: the transactions it commits (import git
+    /// head / refs) then stay under the Snapshot phase header instead of
+    /// printing Transact / Sync/Finalize headers of their own.
+    in_snapshot: bool,
 }
 
 /// Walk up from `cwd` to find the workspace root (the dir containing .jj).
@@ -60,7 +65,10 @@ pub fn find_workspace_root(cwd: &Path) -> Result<PathBuf> {
         }
         match dir.parent() {
             Some(parent) => dir = parent,
-            None => bail!("no .jj repo found above {} — run `jj-gt init` first", cwd.display()),
+            None => bail!(
+                "no .jj repo found above {} — run `jj-gt init` first",
+                cwd.display()
+            ),
         }
     }
 }
@@ -94,11 +102,17 @@ impl Gt {
             explain,
             root,
             cmd_id,
+            in_snapshot: false,
         })
     }
 
     /// Start a transaction stamped with this command's id (see CMD_ID_ATTR).
+    /// This is where the Transact phase begins; the command mutates the view
+    /// in memory from here until finish_tx publishes it.
     pub fn start_tx(&self) -> Transaction {
+        if !self.in_snapshot {
+            self.explain.phase_transact();
+        }
         let mut tx = self.repo.start_transaction();
         tx.set_attribute(CMD_ID_ATTR.to_string(), self.cmd_id.clone());
         tx
@@ -128,10 +142,12 @@ impl Gt {
 
     pub fn trunk_id(&self) -> Result<CommitId> {
         let target = self.repo.view().get_local_bookmark(self.trunk());
-        target
-            .as_normal()
-            .cloned()
-            .ok_or_else(|| anyhow!("trunk bookmark {:?} is missing or conflicted", self.state.trunk))
+        target.as_normal().cloned().ok_or_else(|| {
+            anyhow!(
+                "trunk bookmark {:?} is missing or conflicted",
+                self.state.trunk
+            )
+        })
     }
 
     /// Import options mirroring init: auto-track everything on the remote.
@@ -206,13 +222,16 @@ impl Gt {
     fn base_ignores(&self) -> Result<std::sync::Arc<GitIgnoreFile>> {
         use jj_lib::repo_path::RepoPath;
         let mut ignores = GitIgnoreFile::empty();
-        let global = crate::util::git_output(&self.root, &["config", "--path", "--get", "core.excludesFile"])
-            .ok()
-            .map(std::path::PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("HOME")
-                    .map(|home| std::path::Path::new(&home).join(".config/git/ignore"))
-            });
+        let global = crate::util::git_output(
+            &self.root,
+            &["config", "--path", "--get", "core.excludesFile"],
+        )
+        .ok()
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(|home| std::path::Path::new(&home).join(".config/git/ignore"))
+        });
         if let Some(path) = global {
             ignores = ignores.chain_with_file(RepoPath::root(), path)?;
         }
@@ -225,8 +244,15 @@ impl Gt {
     /// git's own writes (import HEAD before, import refs after), not just
     /// snapshotting files. Always advances the workspace state to the latest op.
     pub fn snapshot(&mut self) -> Result<()> {
+        self.in_snapshot = true;
+        let result = self.snapshot_inner();
+        self.in_snapshot = false;
+        result
+    }
+
+    fn snapshot_inner(&mut self) -> Result<()> {
         let ex = self.explain;
-        ex.section("snapshot working copy (what `jj` does before every command)");
+        ex.phase_snapshot();
         self.import_git_head()?;
         let name = self.ws_name();
         let base_ignores = self.base_ignores()?;
@@ -298,7 +324,10 @@ impl Gt {
         };
         let (new_tree, snapshot_stats) = locked_ws.locked_wc().snapshot(&options).block_on()?;
         for (path, reason) in &snapshot_stats.untracked_paths {
-            eprintln!("jj-gt: warning: not tracking {}: {reason:?}", path.as_internal_file_string());
+            eprintln!(
+                "jj-gt: warning: not tracking {}: {reason:?}",
+                path.as_internal_file_string()
+            );
         }
         if new_tree.tree_ids_and_labels() != wc_commit.tree().tree_ids_and_labels() {
             ex.note("working copy differs from @ — folding files into the wc commit");
@@ -319,8 +348,10 @@ impl Gt {
             // Keep `git status` in the colocated repo honest about wc changes.
             git::update_intent_to_add(tx.repo(), &self.root, &wc_commit.tree(), &new_wc.tree())
                 .block_on()?;
-            let export_stats = git::export_refs(tx.repo_mut())?;
-            report_export(&export_stats);
+            ex.git_refs(
+                ".git/index rewritten; intent-to-add entries refreshed (update_intent_to_add)",
+            );
+            export_refs(tx.repo_mut(), ex)?;
             self.repo = tx.commit("jj-gt: snapshot working copy").block_on()?;
             ex.op_log("jj-gt: snapshot working copy", &self.repo.op_id().hex());
         } else {
@@ -342,10 +373,10 @@ impl Gt {
     pub fn finish_tx(&mut self, mut tx: Transaction, desc: &str) -> Result<bool> {
         let ex = self.explain;
         if !tx.repo().has_changes() {
+            ex.note("transaction has no changes — dropped without publishing an operation");
             println!("Nothing changed.");
             return Ok(false);
         }
-        ex.section(&format!("writes — {desc}"));
         tx.repo_mut().rebase_descendants().block_on()?;
 
         let name = self.ws_name();
@@ -364,24 +395,20 @@ impl Gt {
 
         // ── write 3: colocated git (HEAD + index + refs), INSIDE the tx ──
         if let Some(new_wc) = &new_wc_commit {
+            // reset_head only rewrites .git/HEAD when the view's record of it
+            // differs from parent(@); capture the record first so --explain
+            // can say which case this was.
+            let old_git_head = tx.repo().view().git_head(&name).clone();
+            let root_id = tx.repo().store().root_commit_id().clone();
             match git::reset_head(tx.repo_mut(), &name, &self.root, new_wc).block_on() {
-                Ok(()) => {
-                    let parent = new_wc
-                        .parent_ids()
-                        .first()
-                        .map(|id| short(&id.hex()))
-                        .unwrap_or_default();
-                    ex.git_refs(&format!(".git HEAD ⇒ detached at parent of @ ({parent}); index rebuilt"));
-                }
+                Ok(()) => ex.reset_head(&old_git_head, &new_wc.parent_ids()[0], &root_id),
                 Err(git::GitResetHeadError::UpdateHeadRef(e)) => {
                     eprintln!("jj-gt: warning: git HEAD moved concurrently, not resetting it: {e}");
                 }
                 Err(e) => return Err(e.into()),
             }
         }
-        let export_stats = git::export_refs(tx.repo_mut())?;
-        report_export(&export_stats);
-        ex.git_refs(".git/refs/heads/* now mirror jj bookmarks (export_refs)");
+        export_refs(tx.repo_mut(), ex)?;
 
         // ── the op-log write (the only one Transaction::commit performs) ──
         let repo = tx.commit(desc).block_on()?;
@@ -389,6 +416,9 @@ impl Gt {
         self.repo = repo;
 
         // ── writes 1 + 2: files on disk + workspace state, AFTER the commit ──
+        if !self.in_snapshot {
+            ex.phase_finalize();
+        }
         if let Some(new_wc) = &new_wc_commit {
             let old_tree = old_wc_commit.as_ref().map(|c| c.tree());
             let stats = self
@@ -414,25 +444,79 @@ impl Gt {
         Ok(true)
     }
 
-    /// Resolve a bookmark: local first, then remote (origin, then the "git"
-    /// pseudo-remote colocated git branches live on).
-    pub fn resolve_bookmark(&self, name: &str) -> Result<CommitId> {
-        let ref_name = RefName::new(name);
-        let target = self.repo.view().get_local_bookmark(ref_name);
-        if target.has_conflict() {
-            bail!("bookmark {name:?} is conflicted — resolve it with jj first");
-        }
-        if let Some(id) = target.as_normal() {
-            return Ok(id.clone());
-        }
+    /// Names accepted by checkout, with local bookmarks taking precedence over
+    /// the configured remote and then the colocated Git repo.
+    pub fn checkout_bookmarks(&self) -> BTreeMap<String, RefTarget> {
+        let mut bookmarks: BTreeMap<_, _> = self
+            .repo
+            .view()
+            .local_bookmarks()
+            .map(|(name, target)| (name.as_str().to_owned(), target.clone()))
+            .collect();
         for remote in [self.state.remote.as_str(), "git"] {
-            let symbol = ref_name.to_remote_symbol(RemoteName::new(remote));
-            let remote_ref = self.repo.view().get_remote_bookmark(symbol);
-            if let Some(id) = remote_ref.target.as_normal() {
-                return Ok(id.clone());
+            for (name, remote_ref) in self.repo.view().remote_bookmarks(RemoteName::new(remote)) {
+                if remote_ref.target.is_present() {
+                    bookmarks
+                        .entry(name.as_str().to_owned())
+                        .or_insert_with(|| remote_ref.target.clone());
+                }
             }
         }
-        bail!("no bookmark named {name:?} (locally or on {})", self.state.remote)
+        bookmarks
+    }
+
+    /// Prefer a bookmark name, including a hex-looking one, to a commit ID.
+    pub fn resolve_checkout_target(&self, name: &str) -> Result<CommitId> {
+        if let Some(target) = self.checkout_bookmarks().get(name) {
+            return target.as_normal().cloned().ok_or_else(|| {
+                anyhow!("bookmark {name:?} is conflicted — resolve it with jj first")
+            });
+        }
+        if let Some(prefix) = HexPrefix::try_from_hex(name) {
+            match self
+                .repo
+                .index()
+                .resolve_commit_id_prefix(&prefix)
+                .block_on()?
+            {
+                PrefixResolution::SingleMatch(id) => return Ok(id),
+                PrefixResolution::AmbiguousMatch => {
+                    bail!("commit ID prefix {name:?} is ambiguous — use a longer commit ID")
+                }
+                PrefixResolution::NoMatch => {}
+            }
+        }
+        bail!("no bookmark or commit matching {name:?} — use `jj-gt log` to see checkout targets")
+    }
+
+    /// IDs printed as checkout targets must be unambiguous in jj's index.
+    pub fn short_commit_id(&self, id: &CommitId) -> Result<String> {
+        let len = self
+            .repo
+            .index()
+            .shortest_unique_commit_id_prefix_len(id)
+            .block_on()?;
+        let hex = id.hex();
+        Ok(hex[..len.max(8).min(hex.len())].to_owned())
+    }
+
+    /// A nonempty, unbookmarked tip is work we can resume directly. Named or
+    /// published commits keep checkout's usual fresh-working-copy behavior.
+    pub fn is_saved_work(&self, commit: &Commit) -> Result<bool> {
+        let view = self.repo.view();
+        let id = commit.id();
+        if !view.heads().contains(id)
+            || view.local_bookmarks_for_commit(id).next().is_some()
+            || view
+                .all_remote_bookmarks()
+                .any(|(_, r)| r.target.added_ids().any(|i| i == id))
+            || view
+                .local_tags()
+                .any(|(_, target)| target.added_ids().any(|i| i == id))
+        {
+            return Ok(false);
+        }
+        Ok(!commit.is_empty(self.repo.as_ref()).block_on()?)
     }
 
     /// Delete a local bookmark in the current transaction (RefTarget::absent
@@ -443,10 +527,19 @@ impl Gt {
     }
 }
 
-fn report_export(stats: &git::GitExportStats) {
-    for (symbol, reason) in &stats.failed_bookmarks {
+/// Export refs with the same narration and failure reporting in every phase.
+pub fn export_refs(repo: &mut MutableRepo, ex: Explain) -> Result<()> {
+    let before = ex.capture_git_refs(repo);
+    let stats = git::export_refs(repo)?;
+    for (symbol, reason) in stats.failed_bookmarks.iter().chain(&stats.failed_tags) {
         eprintln!("jj-gt: warning: could not export {symbol} to git: {reason:?}");
     }
+    if let Some(before) = before
+        && let Some(after) = ex.capture_git_refs(repo)
+    {
+        ex.exported_refs(&before, &after);
+    }
+    Ok(())
 }
 
 pub fn summarize(commit: &Commit) -> String {
