@@ -46,8 +46,9 @@ enum Command {
         #[arg(short, long)]
         message: String,
     },
-    /// Amend the working copy into the current branch commit.
+    /// Amend the working copy into the parent branch and start a fresh empty commit.
     Modify {
+        /// Include all changes (accepted for Graphite parity; jj snapshots everything).
         #[arg(long)]
         all: bool,
     },
