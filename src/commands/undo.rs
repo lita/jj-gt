@@ -2,8 +2,15 @@
 //!
 //! jj-lib has no undo API; `jj undo` is CLI code that restores the previous
 //! operation's view (one op at a time). jj-gt can group a whole command because it
-//! stamped every operation with a per-command id (CMD_ID_ATTR): undo finds the
-//! newest command group and restores the view from just before it.
+//! stamps the operations it starts with a per-command id (CMD_ID_ATTR): undo finds
+//! the newest command group and restores the view from just before it.
+//!
+//! Since the move to `WorkspaceOperationRunner`, the implicit snapshot / git
+//! import operations are created inside jj-lib and carry no cmd id (the runner
+//! exposes no attribute hook, and its `args` attribute hard-codes `jj` as the
+//! program name). Undo therefore folds runner-created ops that directly precede a
+//! jj-gt command into that command's group, and skips this invocation's own ops
+//! by starting from the op head recorded at load time (`Gt::initial_op_id`).
 //!
 //! Because an undo is itself a command group, running `jj-gt undo` again restores
 //! to *its* parent — i.e. undo and redo toggle. Simple, fully reversible, and a
@@ -21,7 +28,7 @@ use jj_lib::operation::Operation;
 use owo_colors::OwoColorize;
 use pollster::FutureExt as _;
 
-use crate::engine::{CMD_ID_ATTR, Gt};
+use crate::engine::{CMD_ID_ATTR, Gt, RUNNER_OP_DESCRIPTIONS};
 use crate::util::short;
 
 /// Encoded in the op description so a human reading `jj op log` / `jj-gt ops` can
@@ -41,30 +48,48 @@ fn cmd_id_of(op: &Operation) -> Option<String> {
     op.metadata().attributes.get(CMD_ID_ATTR).cloned()
 }
 
+/// An operation the runner created on its own (snapshot, import git head/refs).
+/// Indistinguishable from the same ops made by the real `jj` CLI — the runner
+/// records `jj` as argv[0] regardless of the actual binary.
+fn is_runner_op(op: &Operation) -> bool {
+    let metadata = op.metadata();
+    metadata.is_snapshot || RUNNER_OP_DESCRIPTIONS.contains(&metadata.description.as_str())
+}
+
 pub fn run(gt: &mut Gt) -> Result<()> {
     let ex = gt.explain;
-    // Snapshot first, as always. Its ops (if any) carry THIS invocation's cmd
-    // id and are skipped below, so undo always targets the previous command.
+    // Snapshot first, as always. Its ops (if any) are skipped below, so undo
+    // always targets the previous command.
     gt.snapshot()?;
 
-    // Newest operation this undo invocation didn't create.
-    let mut op = gt.repo.operation().clone();
-    while cmd_id_of(&op).as_deref() == Some(gt.cmd_id.as_str()) {
-        op = single_parent(&op)?;
-    }
+    // Newest operation this undo invocation didn't create: the head as of
+    // load. (The runner's ops carry no cmd id, so we can't recognise them by
+    // attribute the way jj-gt used to.)
+    let mut op = gt
+        .repo()
+        .loader()
+        .load_operation(&gt.initial_op_id)
+        .block_on()?;
 
-    // Walk back over the whole command group (ops sharing one cmd id). Ops with
-    // no cmd id (raw jj, or jj-gt init) are undone one at a time. The target is the
-    // operation just before the group — for a jj-gt-undo group, that's the state
-    // the previous undo rewound from, which is why undo/redo toggles.
+    // Walk back over the whole command group (ops sharing one cmd id, plus the
+    // runner's implicit ops right before them). Ops with no cmd id (raw jj, or
+    // jj-gt init) are undone one at a time. The target is the operation just
+    // before the group — for a jj-gt-undo group, that's the state the previous
+    // undo rewound from, which is why undo/redo toggles.
     let group_id = cmd_id_of(&op);
     let mut undone: Vec<String> = Vec::new();
     let target = loop {
         undone.push(op.metadata().description.clone());
         let parent = single_parent(&op)?;
-        match (&group_id, cmd_id_of(&parent)) {
-            (Some(gid), Some(pid)) if *gid == pid => op = parent,
-            _ => break parent,
+        let same_group = match (&group_id, cmd_id_of(&parent)) {
+            (Some(gid), Some(pid)) => *gid == pid,
+            (Some(_), None) => is_runner_op(&parent),
+            (None, _) => false,
+        };
+        if same_group {
+            op = parent;
+        } else {
+            break parent;
         }
     };
 
