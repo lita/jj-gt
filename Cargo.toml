@@ -10,7 +10,10 @@ name = "jj-gt"
 path = "src/main.rs"
 
 [dependencies]
-jj-lib = "0.45.1"
+# jj-lib from jj-vcs/jj PR #9300 ("WorkspaceOperationRunner"), rebased onto
+# upstream main e6dd2c0d6. The branch lives in this repo as an orphan history:
+# a squashed snapshot of upstream main followed by the 14 rebased PR commits.
+jj-lib = { git = "https://github.com/lita/jj-gt.git", branch = "cursor-agent/jj-lib-pr-9300-rebased-500e" }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 pollster = "0.4"
