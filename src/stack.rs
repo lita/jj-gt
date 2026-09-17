@@ -28,7 +28,7 @@ pub fn current_stack(gt: &Gt) -> Result<Vec<StackEntry>> {
     // Downstack: trunk..@, bottom-up.
     let down_expr = ResolvedRevsetExpression::commit(trunk_id)
         .range(&ResolvedRevsetExpression::commit(wc.id().clone()));
-    let down = down_expr.evaluate(gt.repo.as_ref())?;
+    let down = down_expr.evaluate(gt.repo().as_ref())?;
     let mut down_ids: Vec<_> = futures::executor::block_on_stream(down.stream())
         .collect::<Result<Vec<_>, _>>()?;
     down_ids.reverse();
@@ -36,10 +36,10 @@ pub fn current_stack(gt: &Gt) -> Result<Vec<StackEntry>> {
 
     // Full stack = the root's descendant subtree (includes @ and any upstack).
     let expr = ResolvedRevsetExpression::commit(root_id).descendants();
-    let revset = expr.evaluate(gt.repo.as_ref())?;
+    let revset = expr.evaluate(gt.repo().as_ref())?;
     let mut commits: Vec<Commit> = revset
         .stream()
-        .commits(gt.repo.store())
+        .commits(gt.repo().store())
         .try_collect()
         .block_on()?;
     drop(revset);
@@ -48,7 +48,7 @@ pub fn current_stack(gt: &Gt) -> Result<Vec<StackEntry>> {
     let mut entries = Vec::new();
     for commit in commits {
         let bookmark = gt
-            .repo
+            .repo()
             .view()
             .local_bookmarks_for_commit(commit.id())
             .map(|(name, _)| name.to_owned())
@@ -57,7 +57,7 @@ pub fn current_stack(gt: &Gt) -> Result<Vec<StackEntry>> {
         // as @; abandoned ones may linger briefly mid-command).
         let is_scratch = bookmark.is_none()
             && commit.description().is_empty()
-            && commit.is_empty(gt.repo.as_ref()).block_on()?;
+            && commit.is_empty(gt.repo().as_ref()).block_on()?;
         entries.push(StackEntry {
             commit,
             bookmark,

@@ -49,7 +49,7 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
     let remote = gt.remote().to_owned();
     let mut bookmarks = Vec::new();
     {
-        let view = gt.repo.view();
+        let view = gt.repo().view();
         for (_, name) in &branches {
             let local_target = view.get_local_bookmark(name);
             let remote_ref = view.get_remote_bookmark(name.to_remote_symbol(&remote));
@@ -76,7 +76,7 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
     if !bookmarks.is_empty() {
         let n = bookmarks.len();
         let mut tx = gt.start_tx();
-        let options = subprocess_options(&gt.settings, askpass)?;
+        let options = subprocess_options(&gt.settings(), askpass)?;
         ex.net(&format!(
             "git push --force-with-lease {} branch(es) → {}",
             n,
@@ -123,7 +123,7 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
         let parent_id = entry.commit.parent_ids().first().cloned();
         let base = match &parent_id {
             Some(pid) if *pid != trunk_id => gt
-                .repo
+                .repo()
                 .view()
                 .local_bookmarks_for_commit(pid)
                 .map(|(n, _)| n.to_owned())

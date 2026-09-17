@@ -11,7 +11,7 @@ use crate::util::short;
 pub fn run(gt: &mut Gt, _all: bool) -> Result<()> {
     gt.snapshot()?;
     let wc = gt.wc_commit()?;
-    if wc.is_empty(gt.repo.as_ref()).block_on()? {
+    if wc.is_empty(gt.repo().as_ref()).block_on()? {
         bail!("no changes in the working copy — nothing to amend");
     }
     let parent_id = wc
@@ -19,7 +19,7 @@ pub fn run(gt: &mut Gt, _all: bool) -> Result<()> {
         .first()
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("working-copy commit has no parent"))?;
-    if parent_id == *gt.repo.store().root_commit_id() {
+    if parent_id == *gt.repo().store().root_commit_id() {
         bail!(
             "working copy is based on jj's root commit, not a branch — \
              run `jj-gt sync` or `jj-gt checkout <branch>` to recover"
@@ -29,9 +29,9 @@ pub fn run(gt: &mut Gt, _all: bool) -> Result<()> {
     if parent_id == trunk_id {
         bail!("@ sits directly on {} — use `jj-gt create` to start a branch", gt.state.trunk);
     }
-    let parent = gt.repo.store().get_commit(&parent_id)?;
+    let parent = gt.repo().store().get_commit(&parent_id)?;
     let branch = gt
-        .repo
+        .repo()
         .view()
         .local_bookmarks_for_commit(&parent_id)
         .map(|(name, _)| name.to_owned())

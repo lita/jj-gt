@@ -10,7 +10,7 @@ use crate::engine::Gt;
 pub fn run(gt: &mut Gt, name: &str) -> Result<()> {
     gt.snapshot()?;
     let target_id = gt.resolve_bookmark(name)?;
-    let target = gt.repo.store().get_commit(&target_id)?;
+    let target = gt.repo().store().get_commit(&target_id)?;
     let ws_name = gt.ws_name();
     let mut tx = gt.start_tx();
     // View-side checkout only: creates the new empty wc commit and points the

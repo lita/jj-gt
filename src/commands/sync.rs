@@ -50,7 +50,7 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
         remote_auto_track_bookmarks: auto_track,
     };
     {
-        let options = subprocess_options(&gt.settings, askpass)?;
+        let options = subprocess_options(&gt.settings(), askpass)?;
         let mut fetch = git::GitFetch::new(tx.repo_mut(), options, &import_options)?;
         ex.net(&format!("git fetch {} (updates .git/refs/remotes/* only)", remote.as_str()));
         let refspecs = git::expand_fetch_refspecs(

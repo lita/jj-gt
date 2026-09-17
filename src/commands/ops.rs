@@ -9,7 +9,7 @@ use crate::engine::Gt;
 use crate::util::short;
 
 pub fn run(gt: &Gt) -> Result<()> {
-    print_ops(&gt.repo, 12)
+    print_ops(&gt.repo(), 12)
 }
 
 pub fn print_ops(repo: &ReadonlyRepo, limit: usize) -> Result<()> {

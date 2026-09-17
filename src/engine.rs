@@ -1,17 +1,20 @@
-//! The "three writes" engine.
+//! The "three writes" engine — now driven by jj-lib's `WorkspaceOperationRunner`.
 //!
 //! jj-lib's Transaction::commit writes ONLY the op log (op store + op heads +
-//! index). Everything else the jj CLI quietly does around every command is our
-//! job here:
+//! index). Everything else the jj CLI quietly does around every command used to
+//! be reimplemented here:
 //!
 //!   write 0  snapshot: fold dirty files into @ (its own operation)
 //!   write 1  working-copy files on disk        (LockedWorkingCopy::check_out)
 //!   write 2  workspace state (.jj/working_copy) (LockedWorkspace::finish)
 //!   write 3  colocated git refs + HEAD + index (git::export_refs / reset_head)
 //!
-//! Order is load-bearing: reset_head + export_refs run on tx.repo_mut()
-//! BEFORE tx.commit (so the exported state is recorded in the same operation);
-//! the working copy is updated AFTER tx.commit (finish() needs the new op id).
+//! With jj-vcs/jj PR #9300 those writes live in the library:
+//! `WorkspaceOperationRunner::{import_git_head, snapshot_working_copy,
+//! import_git_refs, finish_transaction}` perform them in the right order and
+//! hand back a state struct describing what happened. jj-gt's job shrinks to
+//! configuring the runner (settings, snapshot options, import options) and
+//! narrating the returned state for `--explain`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -23,13 +26,18 @@ use jj_lib::git;
 use jj_lib::gitignore::GitIgnoreFile;
 use jj_lib::matchers::{EverythingMatcher, NothingMatcher};
 use jj_lib::object_id::ObjectId;
-use jj_lib::op_store::RefTarget;
+use jj_lib::op_store::{OperationId, RefTarget};
+use jj_lib::readonly_user_repo::ReadonlyUserRepo;
 use jj_lib::ref_name::{RefName, RemoteName, WorkspaceNameBuf};
 use jj_lib::repo::{ReadonlyRepo, Repo as _};
+use jj_lib::revset::RevsetExtensions;
 use jj_lib::settings::UserSettings;
 use jj_lib::transaction::Transaction;
-use jj_lib::working_copy::{SnapshotOptions, WorkingCopyFreshness};
+use jj_lib::user_error::{ErrorHint, UserError};
+use jj_lib::working_copy::SnapshotOptions;
 use jj_lib::workspace::Workspace;
+use jj_lib::workspace_operation_runner::{WorkspaceOperationError, WorkspaceOperationRunner};
+use jj_lib::workspace_util::WorkspaceEnvironment;
 use pollster::FutureExt as _;
 
 use crate::explain::Explain;
@@ -37,18 +45,39 @@ use crate::state::GtState;
 use crate::util::short;
 
 /// Operation-metadata attribute stamping every op a jj-gt command creates, so
-/// `jj-gt undo` can roll back a whole command (snapshot included) as one group.
+/// `jj-gt undo` can roll back a whole command as one group.
+///
+/// Only the transactions jj-gt starts itself carry it: the runner creates the
+/// snapshot / git-import operations internally and offers no hook for extra
+/// attributes, so `undo` recognises those by their `is_snapshot` flag and
+/// fixed descriptions instead (see `commands::undo`).
 pub const CMD_ID_ATTR: &str = "gt-command-id";
 
+/// Descriptions the runner hard-codes for the operations it creates on its own.
+pub const RUNNER_OP_DESCRIPTIONS: &[&str] =
+    &["snapshot working copy", "import git head", "import git refs"];
+
+/// The CLI knobs the runner's methods take as plain parameters. jj-gt always
+/// runs as the head operation, always updates the working copy, always
+/// publishes, and has no `--ignore-immutable`.
+const MAY_UPDATE_WORKING_COPY: bool = true;
+const WORKING_COPY_SHARED_WITH_GIT: bool = true;
+const SHOULD_PUBLISH: bool = true;
+const IGNORE_IMMUTABLE: bool = false;
+
 pub struct Gt {
-    pub workspace: Workspace,
-    pub repo: Arc<ReadonlyRepo>,
-    pub settings: UserSettings,
+    /// Owns the `Workspace`, the loaded repo, and the `WorkspaceEnvironment`.
+    runner: WorkspaceOperationRunner,
     pub state: GtState,
     pub explain: Explain,
     pub root: PathBuf,
     /// Unique id for this jj-gt invocation; stamped on every operation it commits.
     pub cmd_id: String,
+    /// The operation head when this invocation loaded the repo, i.e. before
+    /// any of its own snapshot/import operations. `undo` uses it to skip them.
+    pub initial_op_id: OperationId,
+    /// argv, recorded by the runner in every operation's `args` attribute.
+    args: Vec<String>,
 }
 
 /// Walk up from `cwd` to find the workspace root (the dir containing .jj).
@@ -63,6 +92,22 @@ pub fn find_workspace_root(cwd: &Path) -> Result<PathBuf> {
             None => bail!("no .jj repo found above {} — run `jj-gt init` first", cwd.display()),
         }
     }
+}
+
+/// jj-lib's `UserError` is a plain struct (no `std::error::Error` impl), so it
+/// can't ride `?` into anyhow directly. Flatten it, hints included.
+pub fn anyhow_from_user_error(err: UserError) -> anyhow::Error {
+    let mut msg = err.error.to_string();
+    for hint in &err.hints {
+        match hint {
+            ErrorHint::PlainText(text) => {
+                msg.push_str("\nhint: ");
+                msg.push_str(text);
+            }
+            ErrorHint::Formatted(_) => {}
+        }
+    }
+    anyhow!(msg)
 }
 
 impl Gt {
@@ -80,6 +125,25 @@ impl Gt {
         // by committing a merge operation — an op-log write most people never
         // know happens.
         let repo = workspace.repo_loader().load_at_head().block_on()?;
+        let initial_op_id = repo.op_id().clone();
+
+        // The environment reads revset/fileset aliases and UI settings from the
+        // workspace's settings. We deliberately don't call
+        // `reload_revset_expressions`, which would need the CLI's
+        // `immutable_heads()` alias; without it only root() is immutable,
+        // matching jj-gt's previous behaviour of rebasing everything.
+        let env = WorkspaceEnvironment::new(
+            &workspace,
+            cwd.to_path_buf(),
+            Arc::new(RevsetExtensions::default()),
+            |args| {
+                eprintln!("jj-gt: warning: {args}");
+                Ok(())
+            },
+        )
+        .map_err(anyhow_from_user_error)?;
+        let runner = WorkspaceOperationRunner::new(env, workspace, ReadonlyUserRepo::new(repo));
+
         let state = GtState::load(&root)?;
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -87,25 +151,35 @@ impl Gt {
             .unwrap_or(0);
         let cmd_id = format!("{}-{nanos}", std::process::id());
         Ok(Gt {
-            workspace,
-            repo,
-            settings,
+            runner,
             state,
             explain,
             root,
             cmd_id,
+            initial_op_id,
+            args: std::env::args().collect(),
         })
     }
 
+    /// The repo as of the last operation this invocation committed.
+    pub fn repo(&self) -> &Arc<ReadonlyRepo> {
+        self.runner.user_repo().repo()
+    }
+
+    pub fn settings(&self) -> &UserSettings {
+        self.runner.settings()
+    }
+
     /// Start a transaction stamped with this command's id (see CMD_ID_ATTR).
-    pub fn start_tx(&self) -> Transaction {
-        let mut tx = self.repo.start_transaction();
+    /// The runner records argv as the `args` attribute, like the jj CLI.
+    pub fn start_tx(&mut self) -> Transaction {
+        let mut tx = self.runner.start_transaction(&self.args).into_inner();
         tx.set_attribute(CMD_ID_ATTR.to_string(), self.cmd_id.clone());
         tx
     }
 
     pub fn ws_name(&self) -> WorkspaceNameBuf {
-        self.workspace.workspace_name().to_owned()
+        self.runner.workspace_name().to_owned()
     }
 
     pub fn trunk(&self) -> &RefName {
@@ -117,17 +191,15 @@ impl Gt {
     }
 
     pub fn wc_commit(&self) -> Result<Commit> {
-        let name = self.ws_name();
         let id = self
-            .repo
-            .view()
-            .get_wc_commit_id(&name)
+            .runner
+            .get_wc_commit_id()
             .ok_or_else(|| anyhow!("workspace has no working-copy commit"))?;
-        Ok(self.repo.store().get_commit(id)?)
+        Ok(self.repo().store().get_commit(id)?)
     }
 
     pub fn trunk_id(&self) -> Result<CommitId> {
-        let target = self.repo.view().get_local_bookmark(self.trunk());
+        let target = self.repo().view().get_local_bookmark(self.trunk());
         target
             .as_normal()
             .cloned()
@@ -146,58 +218,6 @@ impl Gt {
             record_synthetic_predecessors: false,
             remote_auto_track_bookmarks: auto_track,
         }
-    }
-
-    /// Adopt writes made to the colocated .git by OTHER tools (raw git, IDEs):
-    /// import HEAD before snapshotting — if git moved HEAD, the files on disk
-    /// already match it, so the working copy gets `reset` (state only).
-    /// Without this, an external `git commit` would be silently re-folded into
-    /// the stale @ and HEAD sync would wedge forever. The jj CLI does exactly
-    /// this at the start of every colocated command.
-    fn import_git_head(&mut self) -> Result<()> {
-        let ex = self.explain;
-        let name = self.ws_name();
-        let mut tx = self.start_tx();
-        git::import_head(tx.repo_mut(), &name, &self.root).block_on()?;
-        if !tx.repo().has_changes() {
-            return Ok(());
-        }
-        ex.note("git HEAD moved outside jj-gt — adopting it (import_head)");
-        if let Some(head_id) = tx.repo().view().git_head(&name).as_normal().cloned() {
-            let head_commit = tx.repo().store().get_commit(&head_id)?;
-            let new_wc = tx
-                .repo_mut()
-                .check_out(name.clone(), &head_commit)
-                .block_on()?;
-            tx.repo_mut().rebase_descendants().block_on()?;
-            let mut locked_ws = self.workspace.start_working_copy_mutation().block_on()?;
-            locked_ws.locked_wc().reset(&new_wc).block_on()?;
-            self.repo = tx.commit("jj-gt: import git head").block_on()?;
-            ex.op_log("jj-gt: import git head", &self.repo.op_id().hex());
-            locked_ws.finish(self.repo.op_id().clone()).block_on()?;
-            ex.workspace_state(&self.repo.op_id().hex());
-        } else {
-            self.repo = tx.commit("jj-gt: import git head").block_on()?;
-            ex.op_log("jj-gt: import git head", &self.repo.op_id().hex());
-        }
-        Ok(())
-    }
-
-    /// Import git refs after snapshotting — branches moved by other tools
-    /// become visible to jj (and may rebase @, hence the full epilogue).
-    fn import_git_refs(&mut self) -> Result<()> {
-        let mut tx = self.start_tx();
-        let stats = git::import_refs(tx.repo_mut(), &self.import_options()).block_on()?;
-        if !tx.repo().has_changes() {
-            return Ok(());
-        }
-        self.explain.note(&format!(
-            "git refs moved outside jj-gt — imported {} bookmark change(s)",
-            stats.changed_remote_bookmarks.len()
-        ));
-        tx.repo_mut().rebase_descendants().block_on()?;
-        self.finish_tx(tx, "jj-gt: import git refs")?;
-        Ok(())
     }
 
     /// Base ignores for snapshotting, like the jj CLI builds them: the user's
@@ -223,72 +243,37 @@ impl Gt {
     /// Write 0: snapshot the working copy — what the jj CLI does implicitly at
     /// the start of every command. For a colocated repo that includes ADOPTING
     /// git's own writes (import HEAD before, import refs after), not just
-    /// snapshotting files. Always advances the workspace state to the latest op.
+    /// snapshotting files. The three steps are the runner's; jj-gt only picks
+    /// the options and narrates the returned state.
     pub fn snapshot(&mut self) -> Result<()> {
         let ex = self.explain;
         ex.section("snapshot working copy (what `jj` does before every command)");
-        self.import_git_head()?;
-        let name = self.ws_name();
-        let base_ignores = self.base_ignores()?;
-        let mut locked_ws = self.workspace.start_working_copy_mutation().block_on()?;
-        let mut wc_commit = {
-            let id = self
-                .repo
-                .view()
-                .get_wc_commit_id(&name)
-                .ok_or_else(|| anyhow!("workspace has no working-copy commit"))?;
-            self.repo.store().get_commit(id)?
-        };
-        match WorkingCopyFreshness::check_stale(locked_ws.locked_wc(), &wc_commit, &self.repo)
+
+        // Adopt writes made to the colocated .git by OTHER tools (raw git,
+        // IDEs): if git moved HEAD, the files on disk already match it, so the
+        // runner `reset`s the working copy (state only) to the new HEAD.
+        let before = self.repo().op_id().clone();
+        if let Some(old_head_present) = self
+            .runner
+            .import_git_head(
+                &self.args,
+                MAY_UPDATE_WORKING_COPY,
+                WORKING_COPY_SHARED_WITH_GIT,
+                SHOULD_PUBLISH,
+                IGNORE_IMMUTABLE,
+            )
             .block_on()?
         {
-            WorkingCopyFreshness::Fresh => {}
-            WorkingCopyFreshness::Updated(op) => {
-                // The repo we loaded is older than the working copy: reload.
-                ex.note("repo loaded at an older op than the working copy — reloading");
-                self.repo = self.repo.reload_at(&op).block_on()?;
-                let id = self
-                    .repo
-                    .view()
-                    .get_wc_commit_id(&name)
-                    .ok_or_else(|| anyhow!("workspace has no working-copy commit"))?;
-                wc_commit = self.repo.store().get_commit(id)?;
-            }
-            WorkingCopyFreshness::WorkingCopyStale => {
-                // The working copy was left behind by an op-log write that
-                // never did writes 1+2. Healing by check_out is only safe if
-                // the disk has no unsnapshotted edits — check_out would erase
-                // them. Compare the stale op's wc tree with the recorded tree.
-                ex.note("STALE working copy detected (op log moved without writes 1+2)");
-                let old_op_id = locked_ws.locked_wc().old_operation_id().clone();
-                let old_op = self.repo.loader().load_operation(&old_op_id).block_on()?;
-                let old_repo = self.repo.loader().load_at(&old_op).block_on()?;
-                let stale_commit = old_repo
-                    .view()
-                    .get_wc_commit_id(&name)
-                    .map(|id| old_repo.store().get_commit(id))
-                    .transpose()?;
-                let clean = stale_commit.is_some_and(|c| {
-                    c.tree().tree_ids_and_labels()
-                        == locked_ws.locked_wc().old_tree().tree_ids_and_labels()
-                });
-                if !clean {
-                    bail!(
-                        "working copy is stale AND has unsnapshotted changes — \
-                         run `jj workspace update-stale` to recover"
-                    );
-                }
-                let stats = locked_ws.locked_wc().check_out(&wc_commit).block_on()?;
-                ex.working_copy(stats.added_files, stats.updated_files, stats.removed_files);
-                eprintln!(
-                    "jj-gt: healed stale working copy (now at op {})",
-                    short(&self.repo.op_id().hex())
-                );
-            }
-            WorkingCopyFreshness::SiblingOperation => {
-                bail!("working copy belongs to a sibling operation — resolve with `jj` first");
-            }
+            ex.note(if old_head_present {
+                "git HEAD moved outside jj-gt — adopting it (import_head)"
+            } else {
+                "git HEAD appeared — adopting it (import_head)"
+            });
+            self.narrate_new_op(&before, "import git head");
+            ex.workspace_state(&self.repo().op_id().hex());
         }
+
+        let base_ignores = self.base_ignores()?;
         let options = SnapshotOptions {
             base_ignores,
             progress: None,
@@ -296,49 +281,133 @@ impl Gt {
             force_tracking_matcher: &NothingMatcher,
             max_new_file_size: 8 << 20, // 8 MiB — finite, demo-friendly
         };
-        let (new_tree, snapshot_stats) = locked_ws.locked_wc().snapshot(&options).block_on()?;
-        for (path, reason) in &snapshot_stats.untracked_paths {
+        let before = self.repo().op_id().clone();
+        let state = match self.snapshot_working_copy(&options) {
+            Ok(state) => state,
+            Err(WorkspaceOperationError::StaleWorkingCopy(stale_op_id)) => {
+                // The runner refuses to snapshot a stale working copy (the jj
+                // CLI sends users to `jj workspace update-stale`). jj-gt heals
+                // it itself when that is provably safe, then retries.
+                self.heal_stale_working_copy(&stale_op_id)?;
+                self.snapshot_working_copy(&options)?
+            }
+            Err(err) => return Err(err.into()),
+        };
+        for (path, reason) in &state.stats.untracked_paths {
             eprintln!("jj-gt: warning: not tracking {}: {reason:?}", path.as_internal_file_string());
         }
-        if new_tree.tree_ids_and_labels() != wc_commit.tree().tree_ids_and_labels() {
-            ex.note("working copy differs from @ — folding files into the wc commit");
-            // Field-precise borrow (locked_ws holds &mut self.workspace, so
-            // the whole-self start_tx() helper can't be used here).
-            let mut tx = self.repo.start_transaction();
-            tx.set_attribute(CMD_ID_ATTR.to_string(), self.cmd_id.clone());
-            tx.set_is_snapshot(true);
-            let new_wc = tx
-                .repo_mut()
-                .rewrite_commit(&wc_commit)
-                .set_tree(new_tree)
-                .write()
-                .block_on()?;
-            tx.repo_mut()
-                .set_wc_commit(name.clone(), new_wc.id().clone())?;
-            tx.repo_mut().rebase_descendants().block_on()?;
-            // Keep `git status` in the colocated repo honest about wc changes.
-            git::update_intent_to_add(tx.repo(), &self.root, &wc_commit.tree(), &new_wc.tree())
-                .block_on()?;
-            let export_stats = git::export_refs(tx.repo_mut())?;
-            report_export(&export_stats);
-            self.repo = tx.commit("jj-gt: snapshot working copy").block_on()?;
-            ex.op_log("jj-gt: snapshot working copy", &self.repo.op_id().hex());
+        if state.committed_operation {
+            ex.note("working copy differed from @ — folded files into the wc commit");
+            if state.num_rebased > 0 {
+                ex.note(&format!("rebased {} descendant(s) onto the updated @", state.num_rebased));
+            }
+            if let Some(stats) = &state.git_export_stats {
+                report_export(stats);
+                ex.git_refs("index updated (intent-to-add) and refs exported (export_refs)");
+            }
+            self.narrate_new_op(&before, "snapshot working copy");
         } else {
             ex.note("working copy clean — no snapshot operation needed");
         }
-        // Always finish, even when nothing changed: this is write 2, and it
-        // also persists the file-stat cache.
-        locked_ws.finish(self.repo.op_id().clone()).block_on()?;
-        ex.workspace_state(&self.repo.op_id().hex());
+        if let Some(err) = &state.git_reset_err {
+            eprintln!("jj-gt: warning: git HEAD moved concurrently, not resetting it: {err}");
+        }
+        // Write 2 happened inside the runner even when nothing changed (it
+        // also persists the file-stat cache).
+        ex.workspace_state(&self.repo().op_id().hex());
+
         // Refs moved by other tools import AFTER the snapshot (they can
-        // rebase @, so this goes through the full epilogue).
-        self.import_git_refs()?;
+        // rebase @, so the runner runs its full finish_transaction epilogue).
+        let before = self.repo().op_id().clone();
+        if let Some(imported) = self
+            .runner
+            .import_git_refs(
+                &self.args,
+                &self.import_options(),
+                MAY_UPDATE_WORKING_COPY,
+                WORKING_COPY_SHARED_WITH_GIT,
+                SHOULD_PUBLISH,
+                IGNORE_IMMUTABLE,
+            )
+            .block_on()?
+        {
+            ex.note(&format!(
+                "git refs moved outside jj-gt — imported {} bookmark change(s), rebased {} commit(s)",
+                imported.import_stats.changed_remote_bookmarks.len(),
+                imported.num_rebased
+            ));
+            self.narrate_new_op(&before, "import git refs");
+            ex.workspace_state(&self.repo().op_id().hex());
+        }
         Ok(())
     }
 
+    fn snapshot_working_copy(
+        &mut self,
+        options: &SnapshotOptions<'_>,
+    ) -> Result<jj_lib::workspace_operation_runner::SnapshotState, WorkspaceOperationError> {
+        self.runner
+            .snapshot_working_copy(
+                options,
+                &self.args,
+                WORKING_COPY_SHARED_WITH_GIT,
+                SHOULD_PUBLISH,
+                IGNORE_IMMUTABLE,
+            )
+            .block_on()
+    }
+
+    /// The working copy was left behind by an op-log write that never did
+    /// writes 1+2. Healing by check_out is only safe if the disk has no
+    /// unsnapshotted edits — check_out would erase them. Compare the stale
+    /// op's wc tree with the recorded tree before touching anything.
+    fn heal_stale_working_copy(&mut self, stale_op_id: &OperationId) -> Result<()> {
+        let ex = self.explain;
+        ex.note("STALE working copy detected (op log moved without writes 1+2)");
+        let name = self.ws_name();
+        let wc_commit = self.wc_commit()?;
+        let repo = self.repo().clone();
+        let old_op = repo.loader().load_operation(stale_op_id).block_on()?;
+        let old_repo = repo.loader().load_at(&old_op).block_on()?;
+        let stale_commit = old_repo
+            .view()
+            .get_wc_commit_id(&name)
+            .map(|id| old_repo.store().get_commit(id))
+            .transpose()?;
+        let mut locked_ws = self
+            .runner
+            .workspace_mut()
+            .start_working_copy_mutation()
+            .block_on()?;
+        let clean = stale_commit.is_some_and(|c| {
+            c.tree().tree_ids_and_labels() == locked_ws.locked_wc().old_tree().tree_ids_and_labels()
+        });
+        if !clean {
+            bail!(
+                "working copy is stale AND has unsnapshotted changes — \
+                 run `jj workspace update-stale` to recover"
+            );
+        }
+        let stats = locked_ws.locked_wc().check_out(&wc_commit).block_on()?;
+        ex.working_copy(stats.added_files, stats.updated_files, stats.removed_files);
+        locked_ws.finish(repo.op_id().clone()).block_on()?;
+        ex.workspace_state(&repo.op_id().hex());
+        eprintln!("jj-gt: healed stale working copy (now at op {})", short(&repo.op_id().hex()));
+        Ok(())
+    }
+
+    /// Narrate the op-log write if the runner committed a new operation since
+    /// `before`. The runner picks the description; we can only observe it.
+    fn narrate_new_op(&self, before: &OperationId, desc: &str) {
+        let now = self.repo().op_id();
+        if now != before {
+            self.explain.op_log(desc, &now.hex());
+        }
+    }
+
     /// The epilogue every mutating jj-gt command shares — the jj CLI's
-    /// finish_transaction, reimplemented. Returns false if the transaction had
-    /// no changes (and was dropped).
+    /// finish_transaction, now `WorkspaceOperationRunner::finish_transaction`.
+    /// Returns false if the transaction had no changes (and was dropped).
     pub fn finish_tx(&mut self, mut tx: Transaction, desc: &str) -> Result<bool> {
         let ex = self.explain;
         if !tx.repo().has_changes() {
@@ -346,26 +415,34 @@ impl Gt {
             return Ok(false);
         }
         ex.section(&format!("writes — {desc}"));
-        tx.repo_mut().rebase_descendants().block_on()?;
+        // Like WorkspaceCommandTransaction::finish: rebase descendants first,
+        // leaving immutable ones (only root(), for jj-gt) alone.
+        let num_rebased = self
+            .runner
+            .rebase_mutable_descendants(&mut tx, IGNORE_IMMUTABLE)
+            .block_on()?;
+        if num_rebased > 0 {
+            ex.note(&format!("rebased {num_rebased} descendant commit(s)"));
+        }
 
-        let name = self.ws_name();
-        let old_wc_commit = tx
-            .base_repo()
-            .view()
-            .get_wc_commit_id(&name)
-            .map(|id| tx.base_repo().store().get_commit(id))
-            .transpose()?;
-        let new_wc_commit = tx
-            .repo()
-            .view()
-            .get_wc_commit_id(&name)
-            .map(|id| tx.repo().store().get_commit(id))
-            .transpose()?;
+        // The runner does, in order: reset git HEAD + export refs INSIDE the
+        // tx (write 3), commit the op (the op-log write), then check out the
+        // new @ (writes 1 + 2). It reports back what it did.
+        let (state, _old_repo) = self
+            .runner
+            .finish_transaction(
+                tx,
+                desc,
+                MAY_UPDATE_WORKING_COPY,
+                WORKING_COPY_SHARED_WITH_GIT,
+                SHOULD_PUBLISH,
+                IGNORE_IMMUTABLE,
+            )
+            .block_on()?;
 
-        // ── write 3: colocated git (HEAD + index + refs), INSIDE the tx ──
-        if let Some(new_wc) = &new_wc_commit {
-            match git::reset_head(tx.repo_mut(), &name, &self.root, new_wc).block_on() {
-                Ok(()) => {
+        if let Some(new_wc) = &state.maybe_new_wc_commit {
+            match &state.git_reset_err {
+                None => {
                     let parent = new_wc
                         .parent_ids()
                         .first()
@@ -373,31 +450,27 @@ impl Gt {
                         .unwrap_or_default();
                     ex.git_refs(&format!(".git HEAD ⇒ detached at parent of @ ({parent}); index rebuilt"));
                 }
-                Err(git::GitResetHeadError::UpdateHeadRef(e)) => {
-                    eprintln!("jj-gt: warning: git HEAD moved concurrently, not resetting it: {e}");
+                Some(err) => {
+                    eprintln!("jj-gt: warning: git HEAD moved concurrently, not resetting it: {err}");
                 }
-                Err(e) => return Err(e.into()),
             }
         }
-        let export_stats = git::export_refs(tx.repo_mut())?;
-        report_export(&export_stats);
-        ex.git_refs(".git/refs/heads/* now mirror jj bookmarks (export_refs)");
+        if let Some(stats) = &state.git_export_stats {
+            report_export(stats);
+            ex.git_refs(".git/refs/heads/* now mirror jj bookmarks (export_refs)");
+        }
+        if state.moved_off_immutable {
+            eprintln!("jj-gt: the working-copy commit became immutable; a new commit was created on top");
+        }
 
-        // ── the op-log write (the only one Transaction::commit performs) ──
-        let repo = tx.commit(desc).block_on()?;
-        ex.op_log(desc, &repo.op_id().hex());
-        self.repo = repo;
+        ex.op_log(desc, &self.repo().op_id().hex());
 
-        // ── writes 1 + 2: files on disk + workspace state, AFTER the commit ──
-        if let Some(new_wc) = &new_wc_commit {
-            let old_tree = old_wc_commit.as_ref().map(|c| c.tree());
-            let stats = self
-                .workspace
-                .check_out(self.repo.op_id().clone(), old_tree.as_ref(), new_wc)
-                .block_on()?;
-            ex.working_copy(stats.added_files, stats.updated_files, stats.removed_files);
-            ex.workspace_state(&self.repo.op_id().hex());
-            if old_wc_commit.as_ref().map(|c| c.id()) != Some(new_wc.id()) {
+        if let Some(new_wc) = &state.maybe_new_wc_commit {
+            if let Some(stats) = &state.checkout_stats {
+                ex.working_copy(stats.added_files, stats.updated_files, stats.removed_files);
+                ex.workspace_state(&self.repo().op_id().hex());
+            }
+            if state.maybe_old_wc_commit.as_ref().map(|c| c.id()) != Some(new_wc.id()) {
                 println!(
                     "Working copy now at: {} {}",
                     short(&new_wc.id().hex()),
@@ -405,11 +478,13 @@ impl Gt {
                 );
             }
         } else {
-            // No working-copy commit changed hands (e.g. workspace-less repo);
-            // still advance the recorded op so the workspace isn't stale.
-            let locked_ws = self.workspace.start_working_copy_mutation().block_on()?;
-            locked_ws.finish(self.repo.op_id().clone()).block_on()?;
-            ex.workspace_state(&self.repo.op_id().hex());
+            // No working-copy commit changed hands (e.g. workspace-less repo).
+            // Unlike the old hand-rolled epilogue, the runner (like the jj
+            // CLI) leaves the workspace state alone in this case.
+            ex.note("no working-copy commit for this workspace — files and workspace state untouched");
+        }
+        if state.missing_user_name || state.missing_user_mail {
+            eprintln!("jj-gt: warning: user.name/user.email not configured; commits use an empty identity");
         }
         Ok(true)
     }
@@ -418,7 +493,7 @@ impl Gt {
     /// pseudo-remote colocated git branches live on).
     pub fn resolve_bookmark(&self, name: &str) -> Result<CommitId> {
         let ref_name = RefName::new(name);
-        let target = self.repo.view().get_local_bookmark(ref_name);
+        let target = self.repo().view().get_local_bookmark(ref_name);
         if target.has_conflict() {
             bail!("bookmark {name:?} is conflicted — resolve it with jj first");
         }
@@ -427,7 +502,7 @@ impl Gt {
         }
         for remote in [self.state.remote.as_str(), "git"] {
             let symbol = ref_name.to_remote_symbol(RemoteName::new(remote));
-            let remote_ref = self.repo.view().get_remote_bookmark(symbol);
+            let remote_ref = self.repo().view().get_remote_bookmark(symbol);
             if let Some(id) = remote_ref.target.as_normal() {
                 return Ok(id.clone());
             }
