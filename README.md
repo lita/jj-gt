@@ -1,4 +1,4 @@
-# jj-gt — aka Graphite's gt writting with jj-lib
+# jj-gt — aka Graphite's gt but with jj-lib
 
 This is the demo I used for JJCon 2026. 
 
@@ -7,13 +7,13 @@ This is the demo I used for JJCon 2026.
 pushes them and opens stacked GitHub PRs, `jj-gt sync` fetches trunk and restacks
 — including detecting squash-merged branches by rebasing them to empty.
 
-This is not fully featured and does not talk to Graphite servers at all - although it would not be hard to build if people want that. This has not been extensively tested, as I mostly made this for learning.
+This is not fully featured and **does not talk to Graphite servers at all** - although it would not be hard to build if people want that. This hasn't been extensively tested, as I mostly made it for learning.
 
-I made `--explain` to show when jj specific repository state, disk, and git repository state gets written when using `jj-lib`.
+I made `--explain` to show when jj-specific repository state, disk, and git repository state gets written when using `jj-lib`.
 
-You will need to have rust and cargo installed to build the binary.
+You need Rust and Cargo installed to build the binary.
 
-You do not need `jj` installed to use this tool but I find it helps to use along side it and read the jj op log via `jj op log`
+You do not need `jj` installed to use this tool, but you do need git and a Github Auth token if you want to sync with a remote. I find it helps to use it alongside ' jj ' and read the jj op log via `jj op log`
 
 ## Switching branches
 
@@ -108,5 +108,4 @@ cargo install --path . # installs jj-gt without conflicting with Graphite's gt
 ```
 
 Auth: `gh auth login` (jj-gt takes the token from `gh auth token`, or set
-`GITHUB_TOKEN`). Pushes authenticate via a temporary `GIT_ASKPASS` helper —
-no gitconfig changes.
+`GITHUB_TOKEN`).
