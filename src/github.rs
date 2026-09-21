@@ -7,6 +7,7 @@ use serde::Deserialize;
 
 pub struct GitHub {
     token: String,
+    api_url: String,
     pub owner: String,
     pub repo: String,
 }
@@ -71,8 +72,16 @@ pub fn discover_token() -> Result<String> {
 
 impl GitHub {
     pub fn new(owner: String, repo: String) -> Result<Self> {
+        let api_url = std::env::var("JJ_GT_GITHUB_API_URL")
+            .unwrap_or_else(|_| "https://api.github.com".into());
+        let url = url::Url::parse(&api_url).context("invalid JJ_GT_GITHUB_API_URL")?;
+        let local = matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
+        if url.scheme() != "https" && !(url.scheme() == "http" && local) {
+            bail!("GitHub API URL must use HTTPS (HTTP is allowed only for localhost tests)");
+        }
         Ok(GitHub {
             token: discover_token()?,
+            api_url: api_url.trim_end_matches('/').into(),
             owner,
             repo,
         })
@@ -88,7 +97,7 @@ impl GitHub {
         path: &str,
         body: Option<serde_json::Value>,
     ) -> Result<serde_json::Value> {
-        let url = format!("https://api.github.com{path}");
+        let url = format!("{}{path}", self.api_url);
         let req = ureq::request(method, &url)
             .set("Authorization", &format!("Bearer {}", self.token))
             .set("Accept", "application/vnd.github+json")
@@ -102,7 +111,9 @@ impl GitHub {
             Ok(r) => Ok(r.into_json()?),
             Err(ureq::Error::Status(code, r)) => {
                 let text = r.into_string().unwrap_or_default();
-                Err(anyhow!("GitHub API {method} {path} failed ({code}): {text}"))
+                Err(anyhow!(
+                    "GitHub API {method} {path} failed ({code}): {text}"
+                ))
             }
             Err(e) => Err(anyhow!("GitHub API {method} {path} failed: {e}")),
         }
@@ -150,12 +161,7 @@ impl GitHub {
         )?)?)
     }
 
-    pub fn update_pr(
-        &self,
-        number: u64,
-        base: Option<&str>,
-        body: Option<&str>,
-    ) -> Result<Pr> {
+    pub fn update_pr(&self, number: u64, base: Option<&str>, body: Option<&str>) -> Result<Pr> {
         let mut patch = serde_json::Map::new();
         if let Some(base) = base {
             patch.insert("base".into(), base.into());

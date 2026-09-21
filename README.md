@@ -7,13 +7,58 @@ This is the demo I used for JJCon 2026.
 pushes them and opens stacked GitHub PRs, `jj-gt sync` fetches trunk and restacks
 — including detecting squash-merged branches by rebasing them to empty.
 
-This is not fully featured and **does not talk to Graphite servers at all** - although it would not be hard to build if people want that. This hasn't been extensively tested, as I mostly made it for learning.
+Graphite integration is optional: authenticate with `jj-gt auth --token` to
+create and update stacks through Graphite. Without a Graphite token, `submit`
+uses GitHub directly. This is a learning/demo project, not a fully featured CLI.
 
 I made `--explain` to show when jj-specific repository state, disk, and git repository state gets written when using `jj-lib`.
 
 You need Rust and Cargo installed to build the binary.
 
-You do not need `jj` installed to use this tool, but you do need git and a Github Auth token if you want to sync with a remote. I find it helps to use it alongside ' jj ' and read the jj op log via `jj op log`
+You do not need `jj` installed to use this tool, but you do need git and working
+Git credentials to fetch and push. It also works alongside `jj`; inspect the
+shared operation log with `jj op log`.
+
+## Graphite authentication and stacks
+
+Get a CLI token from [Graphite](https://app.graphite.com/activate), then run:
+
+```sh
+jj-gt auth --token <GRAPHITE-TOKEN>  # works outside a repository too
+jj-gt auth                         # verify the active token
+jj-gt submit                       # push branches, create/update Graphite stack PRs
+jj-gt sync                         # refresh PR status, fetch, remove merged branches, restack
+jj-gt submit                       # push the restack and retarget surviving PRs
+```
+
+`auth` validates the token before saving it in **`~/.jj-gt/config`**, a JSON file
+with an `authToken` field. The directory is private (`0700`) and the file is
+readable and writable only by you (`0600`). Tokens never go into repository
+state (`.jj/gt.json`). `GRAPHITE_AUTH_TOKEN` overrides the saved token, including
+for CI. Existing Graphite CLI config files are not read or modified; authenticate
+`jj-gt` once with the same token you would pass to `gt auth`.
+
+When authenticated, `submit` uses Graphite's stack submission API, prints its PR
+URLs, and preserves existing PR titles and descriptions. New PR descriptions
+come from the commit message after its first line. Successful PR numbers are
+saved even if another PR in the stack fails. `sync` reads Graphite PR status and
+restacks locally; it does not push or create PRs. Confirmed merges only remove a
+branch when its submitted head matches the local commit and the merge is in the
+fetched trunk; the existing Git-based merge detection also remains active.
+
+If Graphite reports that it cannot submit PRs to the repository, `submit`
+automatically falls back to creating or updating stacked PRs directly on GitHub.
+The fallback uses `GITHUB_TOKEN` or `gh auth token`; run `gh auth login` if needed.
+Your saved Graphite token stays configured for repositories it can access.
+
+Graphite tokens authenticate **Graphite API calls**. Git fetch/push still use
+SSH, your Git credential helper, or a GitHub token from `GITHUB_TOKEN` / `gh auth
+token`. With SSH or a working helper, Graphite mode does not require `gh` or a
+GitHub API token. Direct GitHub PR submission does require a GitHub API token.
+
+This integration uses Graphite's internal CLI endpoints, which may change.
+See [API implementation notes](docs/graphite-api.md) for the inspected versions,
+request format, and local testing setup.
 
 ## Switching branches
 
@@ -84,8 +129,8 @@ gh pr merge 1 --squash            # NOTE: --delete-branch silently fails in a
                                   # local-branch cleanup) — delete it below instead
 jj-gt --explain sync              # squash-merge detected (rebased to EMPTY), local
                                   # branch deleted, rest of stack onto new main
-jj-gt submit                      # retarget the surviving PR to main (sync is
-                                  # local-only, like Graphite — submit talks to GitHub)
+jj-gt submit                      # retarget the surviving PR to main (sync does
+                                  # not push; submit updates PRs via Graphite or GitHub)
 git push origin --delete lita/feat-api-add-new-api-method-for-fetching-users
                                   # AFTER submit: deleting a PR's base branch before
                                   # retargeting makes GitHub CLOSE the child PR
@@ -107,5 +152,6 @@ cargo build           # produces target/debug/jj-gt
 cargo install --path . # installs jj-gt without conflicting with Graphite's gt
 ```
 
-Auth: `gh auth login` (jj-gt takes the token from `gh auth token`, or set
-`GITHUB_TOKEN`).
+For direct GitHub PR submission: `gh auth login` (jj-gt takes the token from
+`gh auth token`, or set `GITHUB_TOKEN`). For Graphite, use `jj-gt auth --token`
+as described above.

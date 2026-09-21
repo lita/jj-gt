@@ -1,7 +1,8 @@
 //! jj-gt sync: fetch trunk, drop merged branches, rebase the stack — the command
 //! where jj's rebase machinery shines.
 //!
-//! Detection is two-tier:
+//! Graphite mode also checks confirmed merges of the exact submitted head.
+//! Git-based detection handles:
 //!  - merge/fast-forward landings: index.is_ancestor(commit, new trunk)
 //!  - squash merges: the commit rebases to EMPTY on the new trunk → abandon
 
@@ -18,16 +19,33 @@ use owo_colors::OwoColorize;
 use pollster::FutureExt as _;
 
 use crate::engine::Gt;
-use crate::stack::current_stack;
 use crate::gitnet::{Sideband, subprocess_options};
+use crate::graphite::{Graphite, PrState};
+use crate::stack::current_stack;
 use crate::util::short;
 
-pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
+pub fn run(
+    gt: &mut Gt,
+    askpass: Option<&std::path::Path>,
+    graphite: Option<&Graphite>,
+) -> Result<()> {
     gt.snapshot()?;
     let ex = gt.explain;
     let remote = gt.remote().to_owned();
     // Compute the stack BEFORE fetching, against the old trunk.
     let entries = current_stack(gt)?;
+
+    let graphite_prs = if let Some(api) = graphite {
+        let (owner, repo) = crate::commands::submit::github_repo(gt)?;
+        let names = entries
+            .iter()
+            .filter_map(|entry| entry.bookmark.as_ref().map(|name| name.as_str().to_owned()))
+            .collect::<Vec<_>>();
+        ex.net("Graphite: refresh stack PR status");
+        api.pull_requests(&owner, &repo, &gt.state.trunk, &names)?
+    } else {
+        HashMap::new()
+    };
 
     let mut tx = gt.start_tx();
 
@@ -52,7 +70,10 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
     {
         let options = subprocess_options(&gt.settings, askpass)?;
         let mut fetch = git::GitFetch::new(tx.repo_mut(), options, &import_options)?;
-        ex.net(&format!("git fetch {} (updates .git/refs/remotes/* only)", remote.as_str()));
+        ex.net(&format!(
+            "git fetch {} (updates .git/refs/remotes/* only)",
+            remote.as_str()
+        ));
         let refspecs = git::expand_fetch_refspecs(
             &remote,
             git::GitFetchRefExpression {
@@ -78,8 +99,17 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
         .get_local_bookmark(&trunk_name)
         .as_normal()
         .cloned()
-        .ok_or_else(|| anyhow!("trunk {:?} is missing or conflicted after fetch", gt.state.trunk))?;
-    ex.note(&format!("trunk {} is now {}", gt.state.trunk, short(&new_trunk.hex())));
+        .ok_or_else(|| {
+            anyhow!(
+                "trunk {:?} is missing or conflicted after fetch",
+                gt.state.trunk
+            )
+        })?;
+    ex.note(&format!(
+        "trunk {} is now {}",
+        gt.state.trunk,
+        short(&new_trunk.hex())
+    ));
 
     // ── restack: rebase every stack commit onto its (possibly replaced)
     // parent, bottom-up. A map old-id → replacement handles merged/abandoned
@@ -99,22 +129,56 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
             .as_ref()
             .map(|b| b.as_str().to_string())
             .unwrap_or_else(|| short(&commit.id().hex()));
-        let is_merged = tx
+        let in_trunk = tx
             .repo()
             .index()
             .is_ancestor(commit.id(), &new_trunk)
             .block_on()
             .map_err(|e| anyhow!("index error: {e}"))?;
+        // A server-side squash may include edits, so rebasing it need not
+        // become empty. Only drop it if the merged PR's latest submitted head
+        // matches our commit and its merge commit is in the fetched trunk.
+        // Unsubmitted local edits and merges not fetched yet must survive.
+        let mut graphite_merged = false;
+        if let Some(pr) = entry
+            .bookmark
+            .as_ref()
+            .and_then(|name| graphite_prs.get(name.as_str()))
+            && pr.state == PrState::Merged
+            && pr
+                .versions
+                .iter()
+                .max_by(|left, right| left.created_at.cmp(&right.created_at))
+                .is_some_and(|version| version.head_sha == commit.id().hex())
+            && let Some(sha) = &pr.merge_commit_sha
+            && sha.len() == 40
+            && sha.bytes().all(|b| b.is_ascii_hexdigit())
+            && let Some(merge_id) = jj_lib::backend::CommitId::try_from_hex(sha)
+        {
+            graphite_merged = tx.repo().index().has_id(&merge_id).block_on()?
+                && tx
+                    .repo()
+                    .index()
+                    .is_ancestor(&merge_id, &new_trunk)
+                    .block_on()
+                    .unwrap_or(false);
+        }
         // Children of a merged/landed commit restack onto the new trunk.
         let target_parent = commit
             .parent_ids()
             .first()
             .and_then(|p| replacement.get(p).cloned())
             .unwrap_or_else(|| new_trunk.clone());
-        if is_merged {
+        if in_trunk || graphite_merged {
             // Landed via merge/fast-forward: the commit is in trunk history.
             if let Some(name) = &entry.bookmark {
                 Gt::delete_bookmark(&mut tx, name.as_ref());
+            }
+            if graphite_merged && !in_trunk {
+                ex.note(&format!(
+                    "{label}: Graphite confirms merged into fetched trunk"
+                ));
+                tx.repo_mut().record_abandoned_commit(commit);
             }
             replacement.insert(commit.id().clone(), new_trunk.clone());
             merged.push(label);
@@ -130,7 +194,9 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
         let now_empty = new_commit.is_empty(tx.repo()).block_on()?;
         if now_empty && !commit.is_empty(tx.repo()).block_on().unwrap_or(false) {
             // Rebased to empty on the new trunk: this was a squash merge.
-            ex.note(&format!("{label}: rebased to EMPTY on trunk → squash-merged, abandoning"));
+            ex.note(&format!(
+                "{label}: rebased to EMPTY on trunk → squash-merged, abandoning"
+            ));
             tx.repo_mut().record_abandoned_commit(&new_commit);
             if let Some(name) = &entry.bookmark {
                 Gt::delete_bookmark(&mut tx, name.as_ref());
@@ -141,7 +207,9 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
         }
         if new_commit.has_conflict() {
             conflicted.push(label.clone());
-            ex.note(&format!("{label}: rebase produced conflicts (materialized, not fatal)"));
+            ex.note(&format!(
+                "{label}: rebase produced conflicts (materialized, not fatal)"
+            ));
         } else {
             ex.note(&format!(
                 "{label}: rebased {} → {}",
@@ -160,6 +228,16 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
 
     let changed = gt.finish_tx(tx, "jj-gt sync")?;
 
+    for (branch, pr) in &graphite_prs {
+        if !merged.contains(branch) {
+            if pr.state == PrState::Open {
+                gt.state.prs.insert(branch.clone(), pr.pr_number);
+            } else {
+                gt.state.prs.remove(branch);
+            }
+        }
+    }
+
     // Forget PR numbers for branches that no longer exist.
     for branch in &merged {
         gt.state.prs.remove(branch);
@@ -171,13 +249,25 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
         return Ok(());
     }
     for branch in &merged {
-        println!("{} {} merged into {} — branch deleted", "✓".green(), branch.magenta(), gt.state.trunk);
+        println!(
+            "{} {} merged into {} — branch deleted",
+            "✓".green(),
+            branch.magenta(),
+            gt.state.trunk
+        );
     }
     if restacked > 0 {
-        println!("{} restacked {restacked} commit(s) onto {}", "↻".cyan(), gt.state.trunk);
+        println!(
+            "{} restacked {restacked} commit(s) onto {}",
+            "↻".cyan(),
+            gt.state.trunk
+        );
     }
     for branch in &conflicted {
-        println!("{} {branch} has conflicts — resolve in the working copy", "!".red().bold());
+        println!(
+            "{} {branch} has conflicts — resolve in the working copy",
+            "!".red().bold()
+        );
     }
     if let Err(e) = crate::commands::log::print_stack(gt) {
         eprintln!("jj-gt: note: could not render the stack: {e:#}");

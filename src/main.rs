@@ -3,10 +3,12 @@
 
 mod auth;
 mod commands;
+mod config;
 mod engine;
 mod explain;
 mod github;
 mod gitnet;
+mod graphite;
 mod settings;
 mod stack;
 mod state;
@@ -31,6 +33,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Authenticate with Graphite (get a token at https://app.graphite.com/activate).
+    Auth {
+        #[arg(short, long, value_name = "GRAPHITE_TOKEN")]
+        token: Option<String>,
+    },
     /// Colocate jj onto this git repo and pick a trunk.
     Init,
     /// Check out a bookmark or commit ID; resume unbookmarked saved work.
@@ -77,19 +84,36 @@ fn run() -> Result<()> {
     let explain = Explain::new(cli.explain);
     let cwd = std::env::current_dir()?;
 
+    if let Command::Auth { token } = &cli.command {
+        return commands::auth::run(token.as_deref());
+    }
+
     // Network commands authenticate the git subprocess via GIT_ASKPASS.
     let needs_token = matches!(cli.command, Command::Submit | Command::Sync);
+    let graphite = if needs_token {
+        config::graphite_token()?
+            .map(graphite::Graphite::new)
+            .transpose()?
+    } else {
+        None
+    };
     let askpass: Option<(auth::GitAuth, PathBuf)> = if needs_token {
-        let token = github::discover_token()?;
-        let auth = auth::install(&token)?;
-        let path = std::env::var_os("GIT_ASKPASS").map(PathBuf::from);
-        path.map(|p| (auth, p))
+        // SSH and configured git credential helpers work without a GitHub API
+        // token. A Graphite token is never a credential for git or GitHub.
+        if let Ok(token) = github::discover_token() {
+            let auth = auth::install(&token)?;
+            let path = std::env::var_os("GIT_ASKPASS").map(PathBuf::from);
+            path.map(|p| (auth, p))
+        } else {
+            None
+        }
     } else {
         None
     };
     let askpass_path = askpass.as_ref().map(|(_, p)| p.as_path());
 
     match cli.command {
+        Command::Auth { .. } => unreachable!(),
         Command::Init => commands::init::run(&cwd, explain),
         Command::Checkout { name } => {
             let mut gt = engine::Gt::load(&cwd, explain)?;
@@ -105,11 +129,11 @@ fn run() -> Result<()> {
         }
         Command::Submit => {
             let mut gt = engine::Gt::load(&cwd, explain)?;
-            commands::submit::run(&mut gt, askpass_path)
+            commands::submit::run(&mut gt, askpass_path, graphite.as_ref())
         }
         Command::Sync => {
             let mut gt = engine::Gt::load(&cwd, explain)?;
-            commands::sync::run(&mut gt, askpass_path)
+            commands::sync::run(&mut gt, askpass_path, graphite.as_ref())
         }
         Command::Log => {
             let mut gt = engine::Gt::load(&cwd, explain)?;
