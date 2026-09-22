@@ -126,6 +126,8 @@ fn gt(dir: &Path, args: &[&str]) -> Output {
         .args(args)
         .current_dir(dir)
         .env("GITHUB_TOKEN", "dummy")
+        .env("HOME", dir.join(".jj/test-home"))
+        .env_remove("GRAPHITE_AUTH_TOKEN")
         .env("USER", "test-user")
         .output()
         .unwrap()

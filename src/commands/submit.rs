@@ -1,5 +1,5 @@
 //! jj-gt submit: push every stack branch (force-with-lease) and create/update the
-//! stacked PRs on GitHub.
+//! stacked PRs through Graphite or directly on GitHub.
 //!
 //! The push itself is a jj-lib operation: push_refs mutates the view's
 //! remote-tracking bookmarks, so even a push ends with a transaction commit —
@@ -7,23 +7,33 @@
 
 use anyhow::{Context, Result, bail};
 use jj_lib::git;
+use jj_lib::object_id::ObjectId as _;
 use jj_lib::refs::{LocalAndRemoteRef, RefPushAction, classify_ref_push_action};
 use owo_colors::OwoColorize;
 
 use crate::engine::Gt;
 use crate::github::{GitHub, parse_github_remote};
 use crate::gitnet::{Sideband, subprocess_options};
+use crate::graphite::{Graphite, PrState, Submission, SubmissionResult};
 use crate::stack::{branch_entries, current_stack};
 use crate::util::git_output;
 
 pub fn github_for(gt: &Gt) -> Result<GitHub> {
-    let url = git_output(&gt.root, &["remote", "get-url", &gt.state.remote])?;
-    let (owner, repo) = parse_github_remote(&url)
-        .with_context(|| format!("remote {} ({url}) is not a GitHub repo", gt.state.remote))?;
+    let (owner, repo) = github_repo(gt)?;
     GitHub::new(owner, repo)
 }
 
-pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
+pub fn github_repo(gt: &Gt) -> Result<(String, String)> {
+    let url = git_output(&gt.root, &["remote", "get-url", &gt.state.remote])?;
+    parse_github_remote(&url)
+        .with_context(|| format!("remote {} ({url}) is not a GitHub repo", gt.state.remote))
+}
+
+pub fn run(
+    gt: &mut Gt,
+    askpass: Option<&std::path::Path>,
+    graphite: Option<&Graphite>,
+) -> Result<()> {
     gt.snapshot()?;
     let entries = current_stack(gt)?;
     let branches = branch_entries(&entries)?;
@@ -40,9 +50,95 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
             );
         }
         if entry.commit.description().trim().is_empty() {
-            bail!("{} has no description — describe it before submitting", name.as_str());
+            bail!(
+                "{} has no description — describe it before submitting",
+                name.as_str()
+            );
         }
     }
+
+    // Select the PR backend before pushing. If Graphite lacks repository
+    // access, verify that GitHub credentials are available for the fallback.
+    let mut github_fallback = None;
+    let graphite_repo = if let Some(api) = graphite {
+        let (owner, repo) = github_repo(gt)?;
+        gt.explain.net("Graphite: check repository access");
+        let auth = api.check_auth(Some((&owner, &repo)))?;
+        if auth.can_submit_prs != Some(true) {
+            eprintln!("Graphite cannot submit PRs to {owner}/{repo}; falling back to GitHub.");
+            github_fallback = Some(GitHub::new(owner, repo).context(
+                "GitHub fallback requires GitHub credentials; run `gh auth login` or set GITHUB_TOKEN",
+            )?);
+            None
+        } else {
+            Some((api, owner, repo))
+        }
+    } else {
+        None
+    };
+
+    let graphite_submission = if let Some((api, owner, repo)) = graphite_repo {
+        gt.explain.net("Graphite: look up stack PRs");
+        let names = branches
+            .iter()
+            .map(|(_, name)| name.as_str().to_string())
+            .collect::<Vec<_>>();
+        let existing = api.pull_requests(&owner, &repo, &gt.state.trunk, &names)?;
+        let trunk_id = gt.trunk_id()?;
+        let mut submissions = Vec::new();
+        for (entry, name) in &branches {
+            let parent_id = entry
+                .commit
+                .parent_ids()
+                .first()
+                .context("stack commit has no parent")?;
+            let base = if *parent_id == trunk_id {
+                gt.state.trunk.clone()
+            } else {
+                branches
+                    .iter()
+                    .find(|(parent, _)| parent.commit.id() == parent_id)
+                    .map(|(_, name)| name.as_str().to_string())
+                    .context("stack commit's parent has no branch")?
+            };
+            let pr_number = existing
+                .get(name.as_str())
+                .filter(|pr| pr.state == PrState::Open)
+                .map(|pr| pr.pr_number);
+            submissions.push(Submission {
+                action: if pr_number.is_some() {
+                    "update"
+                } else {
+                    "create"
+                },
+                head: name.as_str().into(),
+                head_sha: entry.commit.id().hex(),
+                base,
+                base_sha: parent_id.hex(),
+                pr_number,
+                title: pr_number.is_none().then(|| {
+                    entry
+                        .commit
+                        .description()
+                        .lines()
+                        .next()
+                        .unwrap_or(name.as_str())
+                        .to_owned()
+                }),
+                body: pr_number.is_none().then(|| {
+                    entry
+                        .commit
+                        .description()
+                        .split_once('\n')
+                        .map(|(_, body)| body.trim().to_owned())
+                        .unwrap_or_default()
+                }),
+            });
+        }
+        Some((owner, repo, submissions))
+    } else {
+        None
+    };
 
     // ── jj side: one lease-protected push for the whole stack ──
     let ex = gt.explain;
@@ -59,7 +155,11 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
             }) {
                 RefPushAction::Update(diff) => bookmarks.push((name.clone(), diff)),
                 RefPushAction::AlreadyMatches => {
-                    ex.note(&format!("{} already up to date on {}", name.as_str(), remote.as_str()));
+                    ex.note(&format!(
+                        "{} already up to date on {}",
+                        name.as_str(),
+                        remote.as_str()
+                    ));
                 }
                 RefPushAction::RemoteUntracked => bail!(
                     "{} exists on the remote but is untracked — `jj bookmark track {}@{}`",
@@ -68,7 +168,10 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
                     remote.as_str()
                 ),
                 RefPushAction::LocalConflicted | RefPushAction::RemoteConflicted => {
-                    bail!("bookmark {} is conflicted — resolve before submitting", name.as_str())
+                    bail!(
+                        "bookmark {} is conflicted — resolve before submitting",
+                        name.as_str()
+                    )
                 }
             }
         }
@@ -114,8 +217,66 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
         println!("All branches already up to date on {}", remote.as_str());
     }
 
+    if let Some((owner, repo, submissions)) = graphite_submission {
+        let api = graphite.expect("Graphite submission requires a client");
+        ex.net("Graphite: submit stack PRs");
+        let results = api.submit(&owner, &repo, &gt.state.trunk, &submissions)?;
+        let mut seen = std::collections::HashSet::new();
+        let mut errors = Vec::new();
+        for result in results {
+            let head = match &result {
+                SubmissionResult::Created { head, .. } | SubmissionResult::Error { head, .. } => {
+                    head
+                }
+            };
+            if !submissions.iter().any(|pr| pr.head == *head) || !seen.insert(head.clone()) {
+                errors.push(format!(
+                    "unexpected or duplicate branch in Graphite response: {head}"
+                ));
+                continue;
+            }
+            match result {
+                SubmissionResult::Created {
+                    head,
+                    pr_number,
+                    pr_url,
+                    warnings,
+                } => {
+                    gt.state.prs.insert(head.clone(), pr_number);
+                    // Persist each success even if another PR in the batch fails.
+                    gt.state.save(&gt.root)?;
+                    println!(
+                        "  {} {}  {}",
+                        format!("#{pr_number}").cyan().bold(),
+                        head.magenta(),
+                        pr_url.dimmed()
+                    );
+                    for warning in warnings {
+                        eprintln!("Graphite: {warning}");
+                    }
+                }
+                SubmissionResult::Error { head, error } => errors.push(format!("{head}: {error}")),
+            }
+        }
+        for pr in &submissions {
+            if !seen.contains(&pr.head) {
+                errors.push(format!("no Graphite result for {}", pr.head));
+            }
+        }
+        if !errors.is_empty() {
+            bail!(
+                "Graphite submission incomplete (successful PRs were saved):\n{}",
+                errors.join("\n")
+            );
+        }
+        return Ok(());
+    }
+
     // ── GitHub side: stacked PRs, base = the parent commit's branch ──
-    let gh = github_for(gt)?;
+    let gh = match github_fallback {
+        Some(gh) => gh,
+        None => github_for(gt)?,
+    };
     let trunk_id = gt.trunk_id()?;
     let mut prs: Vec<(String, u64, String)> = Vec::new(); // (branch, number, url)
     for (entry, name) in &branches {
@@ -146,7 +307,10 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
         let pr = match existing {
             Some(pr) if pr.state == "open" => {
                 if pr.base.r#ref != base {
-                    ex.net(&format!("PATCH pull #{}: base {} → {}", pr.number, pr.base.r#ref, base));
+                    ex.net(&format!(
+                        "PATCH pull #{}: base {} → {}",
+                        pr.number, pr.base.r#ref, base
+                    ));
                     gh.update_pr(pr.number, Some(&base), None)?
                 } else {
                     pr
@@ -166,7 +330,11 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
     for (branch, number, _) in &prs {
         let mut body = String::from("### Stack\n\n");
         for (other_branch, other_number, _) in prs.iter().rev() {
-            let marker = if other_branch == branch { " ← this PR" } else { "" };
+            let marker = if other_branch == branch {
+                " ← this PR"
+            } else {
+                ""
+            };
             body.push_str(&format!("- #{other_number}{marker}\n"));
         }
         body.push_str(&format!("- `{}` (trunk)\n", gt.state.trunk));
@@ -176,7 +344,12 @@ pub fn run(gt: &mut Gt, askpass: Option<&std::path::Path>) -> Result<()> {
 
     println!();
     for (branch, number, url) in prs.iter().rev() {
-        println!("  {} {}  {}", format!("#{number}").cyan().bold(), branch.magenta(), url.dimmed());
+        println!(
+            "  {} {}  {}",
+            format!("#{number}").cyan().bold(),
+            branch.magenta(),
+            url.dimmed()
+        );
     }
     Ok(())
 }
