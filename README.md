@@ -7,17 +7,17 @@ This is the demo I used for JJCon 2026.
 pushes them and opens stacked GitHub PRs, `jj-gt sync` fetches trunk and restacks
 — including detecting squash-merged branches by rebasing them to empty.
 
-Graphite integration is optional: authenticate with `jj-gt auth --token` to
-create and update stacks through Graphite. Without a Graphite token, `submit`
-uses GitHub directly. This is a learning/demo project, not a fully featured CLI.
+Optional Graphite Integration: Authenticate with `jj-gt auth --token` to create and update stacks through Graphite. 
+Without a Graphite token, `submit` uses GitHub directly.
 
-I made `--explain` to show when jj-specific repository state, disk, and git repository state gets written when using `jj-lib`.
+I added `--explain` to show when' jj-lib' writes jj-specific repository state, disk, and git repository state.
 
 You need Rust and Cargo installed to build the binary.
 
 You do not need `jj` installed to use this tool, but you do need git and working
-Git credentials to fetch and push. It also works alongside `jj`; inspect the
-shared operation log with `jj op log`.
+Git credentials to fetch and push. 
+
+It also works alongside `jj`; inspect the shared operation log with `jj op log`.
 
 ## Graphite authentication and stacks
 
