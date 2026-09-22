@@ -2,7 +2,7 @@
 
 This is the demo I used for JJCon 2026. 
 
-`jj-gt` reimplements Graphite's stacked-PR CLI on top of [jj-lib] 0.45.1 with a
+`jj-gt` reimplements Graphite's stacked-PR CLI on top of [jj-lib](https://crates.io/crates/jj-lib) with a
 **colocated** git repo: `jj-gt create` stacks bookmarked commits, `jj-gt submit`
 pushes them and opens stacked GitHub PRs, `jj-gt sync` fetches trunk and restacks
 — including detecting squash-merged branches by rebasing them to empty.
