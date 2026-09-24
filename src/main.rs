@@ -9,6 +9,9 @@ mod explain;
 mod github;
 mod gitnet;
 mod graphite;
+mod patch;
+mod pathspec;
+mod prompt;
 mod settings;
 mod stack;
 mod state;
@@ -58,6 +61,44 @@ enum Command {
         /// Include all changes (accepted for Graphite parity; jj snapshots everything).
         #[arg(long)]
         all: bool,
+    },
+    /// Split the current branch into multiple stacked branches.
+    ///
+    /// Without options, prompts for a strategy (a single-commit branch goes
+    /// straight to --by-hunk). Only --by-file can run non-interactively.
+    #[command(alias = "sp", disable_help_flag = true)]
+    Split {
+        /// Split by commit: pick split points between the branch's existing commits.
+        #[arg(
+            short = 'c',
+            long = "by-commit",
+            visible_alias = "commit",
+            conflicts_with_all = ["by_hunk", "by_file"]
+        )]
+        by_commit: bool,
+        /// Split by hunk: pick hunks for each new single-commit branch, like `git add -p`.
+        #[arg(
+            short = 'h',
+            long = "by-hunk",
+            visible_alias = "hunk",
+            conflicts_with = "by_file"
+        )]
+        by_hunk: bool,
+        /// Split by file: move files matching a git-style PATHSPEC into a new
+        /// parent branch. Repeat for multiple patterns (-f "*.json" -f "*.yaml").
+        #[arg(
+            short = 'f',
+            long = "by-file",
+            visible_alias = "file",
+            value_name = "PATHSPEC"
+        )]
+        by_file: Vec<String>,
+        /// Commit message for the new parent branch (--by-file only); skips all prompts.
+        #[arg(short, long, requires = "by_file")]
+        message: Option<String>,
+        /// Print help (-h is taken by --by-hunk, as in Graphite).
+        #[arg(long, action = clap::ArgAction::Help)]
+        help: Option<bool>,
     },
     /// Push the stack and create/update stacked PRs.
     Submit,
@@ -126,6 +167,22 @@ fn run() -> Result<()> {
         Command::Modify { all } => {
             let mut gt = engine::Gt::load(&cwd, explain)?;
             commands::modify::run(&mut gt, all)
+        }
+        Command::Split {
+            by_commit,
+            by_hunk,
+            by_file,
+            message,
+            help: _,
+        } => {
+            let mut gt = engine::Gt::load(&cwd, explain)?;
+            let opts = commands::split::Options {
+                by_commit,
+                by_hunk,
+                by_file,
+                message,
+            };
+            commands::split::run(&mut gt, &cwd, opts)
         }
         Command::Submit => {
             let mut gt = engine::Gt::load(&cwd, explain)?;

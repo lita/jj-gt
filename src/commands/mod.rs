@@ -5,6 +5,7 @@ pub mod init;
 pub mod log;
 pub mod modify;
 pub mod ops;
+pub mod split;
 pub mod submit;
 pub mod sync;
 pub mod undo;
