@@ -92,6 +92,34 @@ compatibility but is optional. An empty working copy has nothing to amend.
 If the working copy sits directly on trunk, use `jj-gt create -m "My work"`
 to start a branch first.
 
+## Splitting a branch
+
+`jj-gt split` (alias `sp`) splits the current branch — the bookmarked commit
+under the working copy — into several stacked branches, with Graphite's three
+strategies:
+
+```sh
+jj-gt split --by-commit        # -c: pick split points between the branch's commits
+jj-gt split --by-hunk          # -h: pick hunks for each new branch, like git add -p
+jj-gt split --by-file "*.json" # -f: move matching files into a new parent branch
+jj-gt split -f "*.json" -f "*.yaml" -m "chore: config"   # repeatable, non-interactive
+jj-gt split                    # prompts for a strategy (single commit → by hunk)
+```
+
+The current branch keeps its name, message, and change id and ends up on top;
+the new branches are created below it, bottom-up. `--by-commit` only adds
+bookmarks. `--by-hunk` walks the branch's diff in the terminal: answer `y`/`n`
+per hunk, `a`/`d` for the rest of a file, `q` to abort with nothing written;
+each round names one new branch and whatever you don't pick stays on the
+current branch. `--by-file` takes git-style pathspecs relative to the current
+directory (`*.json` matches at any depth, `src/` matches everything under it)
+and is the only form that runs without a terminal — pass `-m` to skip the
+prompts entirely. Descendants restack automatically, `--explain` narrates the
+writes, and `jj-gt undo` reverts the whole split as one command.
+
+Because Graphite spells `--by-hunk` as `-h`, the split subcommand uses
+`--help` only.
+
 
 ## Demo script
 
