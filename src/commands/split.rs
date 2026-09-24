@@ -122,7 +122,10 @@ fn current_branch(gt: &Gt) -> Result<Branch> {
             )
         })?;
     if tip.has_conflict() {
-        bail!("{} has conflicts — resolve them (`jj-gt modify`) before splitting", name.as_str());
+        bail!(
+            "{} has conflicts — resolve them (`jj-gt modify`) before splitting",
+            name.as_str()
+        );
     }
 
     // The branch owns every commit down to trunk or the next bookmark.
@@ -169,9 +172,18 @@ fn choose_mode(branch: &Branch, prompt: &mut Prompt) -> Result<Mode> {
     let choice = prompt.choose(
         &question,
         &[
-            ('c', "by commit — pick split points between existing commits"),
-            ('h', "by hunk — pick hunks for each new branch, like git add -p"),
-            ('f', "by file — move files matching a pathspec into a new parent branch"),
+            (
+                'c',
+                "by commit — pick split points between existing commits",
+            ),
+            (
+                'h',
+                "by hunk — pick hunks for each new branch, like git add -p",
+            ),
+            (
+                'f',
+                "by file — move files matching a pathspec into a new parent branch",
+            ),
         ],
     )?;
     Ok(match choice {
@@ -220,7 +232,10 @@ fn by_commit(gt: &mut Gt, branch: &Branch, prompt: &mut Prompt) -> Result<()> {
         );
     }
     let picks = prompt.indices(
-        &format!("Commits that should END a new branch (e.g. 1,3), from 1 to {}: ", n - 1),
+        &format!(
+            "Commits that should END a new branch (e.g. 1,3), from 1 to {}: ",
+            n - 1
+        ),
         n - 1,
     )?;
     if picks.is_empty() {
@@ -253,7 +268,10 @@ fn by_commit(gt: &mut Gt, branch: &Branch, prompt: &mut Prompt) -> Result<()> {
         "by-commit split is bookmark-only: {} new bookmark(s), no commit rewritten",
         new_bookmarks.len()
     ));
-    gt.finish_tx(tx, &format!("jj-gt split --by-commit {}", branch.name.as_str()))?;
+    gt.finish_tx(
+        tx,
+        &format!("jj-gt split --by-commit {}", branch.name.as_str()),
+    )?;
     println!(
         "Split {} into {} branches",
         branch.name.as_str(),
@@ -313,7 +331,9 @@ fn by_file(
     let default_message = format!("{} ({})", summarize(&branch.tip), displays.join(" "));
     let message = match message {
         Some(m) => m,
-        None if interactive => prompt.input("Commit message for the new branch", &default_message)?,
+        None if interactive => {
+            prompt.input("Commit message for the new branch", &default_message)?
+        }
         None => default_message,
     };
     let mut taken = HashSet::new();
@@ -329,8 +349,16 @@ fn by_file(
         builder.set_or_remove(path, values.after);
     }
     let first_tree = builder.write_tree().block_on()?;
-    let stats = commit_split(gt, branch, vec![(message, name.clone(), first_tree)], "--by-file")?;
-    println!("Created branch {name} below {} ({stats})", branch.name.as_str());
+    let stats = commit_split(
+        gt,
+        branch,
+        vec![(message, name.clone(), first_tree)],
+        "--by-file",
+    )?;
+    println!(
+        "Created branch {name} below {} ({stats})",
+        branch.name.as_str()
+    );
     if let Err(e) = crate::commands::log::print_stack(gt) {
         eprintln!("jj-gt: note: could not render the stack: {e:#}");
     }
@@ -426,7 +454,10 @@ fn by_hunk(gt: &mut Gt, branch: &Branch, prompt: &mut Prompt) -> Result<()> {
         }
     }
     if rounds.is_empty() {
-        bail!("nothing to split — every hunk stayed on {}", branch.name.as_str());
+        bail!(
+            "nothing to split — every hunk stayed on {}",
+            branch.name.as_str()
+        );
     }
 
     // Each new branch's tree is the base plus everything assigned to it or an
@@ -438,7 +469,10 @@ fn by_hunk(gt: &mut Gt, branch: &Branch, prompt: &mut Prompt) -> Result<()> {
         let round = k + 1;
         let mut builder = MergedTreeBuilder::new(parent_tree.clone());
         for (file, hunks) in files.iter().zip(&assigned) {
-            let mask: Vec<bool> = hunks.iter().map(|r| r.is_some_and(|r| r <= round)).collect();
+            let mask: Vec<bool> = hunks
+                .iter()
+                .map(|r| r.is_some_and(|r| r <= round))
+                .collect();
             if let Some(value) = file.apply(&store, &mask)? {
                 builder.set_or_remove(file.path.clone(), value);
             }

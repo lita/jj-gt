@@ -47,7 +47,10 @@ pub struct FileChange {
 
 enum Body {
     /// Text on both sides (an absent side reads as empty): line hunks.
-    Text { segments: Vec<Segment>, hunks: Vec<Hunk> },
+    Text {
+        segments: Vec<Segment>,
+        hunks: Vec<Hunk>,
+    },
     /// Taken or left as a whole (binary, symlink, conflict, mode-only, ...).
     Whole { summary: String },
 }
@@ -271,7 +274,9 @@ impl FileChange {
                         "{}\n",
                         format!("@@ -{old_start},{old_count} +{new_start},{new_count} @@").cyan()
                     );
-                    if let Some(Segment::Same(text)) = range.start.checked_sub(1).map(|i| &segments[i]) {
+                    if let Some(Segment::Same(text)) =
+                        range.start.checked_sub(1).map(|i| &segments[i])
+                    {
                         for line in tail_lines(text, CONTEXT) {
                             push_line(&mut out, ' ', line);
                         }
@@ -328,7 +333,9 @@ impl FileChange {
             match hunk {
                 Hunk::Mode { executable: exec } if picked => executable = *exec,
                 Hunk::Mode { .. } => {}
-                Hunk::Lines { segments: range, .. } => {
+                Hunk::Lines {
+                    segments: range, ..
+                } => {
                     take_after[range.clone()].fill(picked);
                 }
             }
@@ -483,7 +490,12 @@ mod tests {
 
     #[test]
     fn nearby_changes_share_a_hunk_and_far_ones_do_not() {
-        let near = segs(&[("a\n", "a\n"), ("b\n", "B\n"), ("c\nd\n", "c\nd\n"), ("e\n", "E\n")]);
+        let near = segs(&[
+            ("a\n", "a\n"),
+            ("b\n", "B\n"),
+            ("c\nd\n", "c\nd\n"),
+            ("e\n", "E\n"),
+        ]);
         let hunks = group_hunks(&near);
         assert_eq!(hunks.len(), 1);
         let Hunk::Lines {
@@ -497,7 +509,10 @@ mod tests {
             panic!("expected a line hunk");
         };
         assert_eq!(*segments, 1..4);
-        assert_eq!((*old_start, *old_count, *new_start, *new_count), (1, 5, 1, 5));
+        assert_eq!(
+            (*old_start, *old_count, *new_start, *new_count),
+            (1, 5, 1, 5)
+        );
 
         let gap = "1\n2\n3\n4\n5\n6\n7\n";
         let far = segs(&[("b\n", "B\n"), (gap, gap), ("e\n", "E\nF\n")]);
@@ -513,6 +528,9 @@ mod tests {
         else {
             panic!("expected a line hunk");
         };
-        assert_eq!((*old_start, *old_count, *new_start, *new_count), (6, 4, 6, 5));
+        assert_eq!(
+            (*old_start, *old_count, *new_start, *new_count),
+            (6, 4, 6, 5)
+        );
     }
 }
